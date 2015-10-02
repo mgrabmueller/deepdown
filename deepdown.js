@@ -16,6 +16,10 @@ function vLength(p) {
     return Math.sqrt(p.x * p.x + p.y * p.y);
 }
 
+function bboxIntersect(b1, b2) {
+    return !(b1.r < b2.l || b1.l > b2.r || b1.b < b2.t || b1.t > b2.b);
+}
+
 /* Distance between two points `p1' and `p2'.  */
 function pDist(p1, p2) {
     var dx = p2.x - p1.x,
@@ -26,7 +30,7 @@ function pDist(p1, p2) {
 /* Draw a representation of an actor, that is, player or monster.  */
 function drawActor(state, actor, color) {
     var ctx = state.view.ctx;
-    
+
     if (state.view.showBbox) {
 	ctx.strokeStyle = 'rgba(0,0,0,0.4)';
 	ctx.strokeRect(actor.bbox.l, actor.bbox.t, actor.bbox.r - actor.bbox.l, actor.bbox.b - actor.bbox.t);
@@ -42,6 +46,14 @@ function drawActor(state, actor, color) {
     ctx.lineTo(actor.pos.x + Math.cos(actor.angle) * (actor.radius + 5),
                actor.pos.y + Math.sin(actor.angle) * (actor.radius + 5));
     ctx.stroke();
+
+    if (state.view.showCurrentSector && actor.sector !== null) {
+        ctx.fillStyle = 'black';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText("" + actor.sector.id + "@" + actor.height, actor.pos.x, actor.pos.y);
+    }
 }
 
 /* Draw the current frame.  */
@@ -49,12 +61,19 @@ function draw(state) {
     var i;
     var ctx = state.view.ctx;
     var player = state.player;
-    
+
     // Clear previous frame.
     ctx.clearRect(0, 0, state.view.width, state.view.height);
 
+    if (state.view.debug) {
+        ctx.font = 'bold 20px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText("DEBUG", state.view.width - 100, 30);
+    }
+
     ctx.save();
-    
+
     ctx.strokeStyle = 'black';
     ctx.strokeRect(0, 0, state.view.width, state.view.height);
 
@@ -123,18 +142,27 @@ function draw(state) {
         ctx.stroke();
 
 	if (state.view.showBbox) {
-	    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-	    ctx.strokeRect(line.bbox.l, line.bbox.t, line.bbox.r - line.bbox.l, line.bbox.b - line.bbox.t);
+            if (bboxIntersect(line.bbox, state.player.bbox)) {
+	        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+	        ctx.fillRect(line.bbox.l-2, line.bbox.t-2, line.bbox.r - line.bbox.l+4, line.bbox.b - line.bbox.t+4);
+            } else {
+	        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+	        ctx.strokeRect(line.bbox.l-2, line.bbox.t-2, line.bbox.r - line.bbox.l+4, line.bbox.b - line.bbox.t+4);
+            }
 	}
-	
+
         if (state.view.showLineNumbers) {
             ctx.font = 'bold 10px sans-serif';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'center';
             ctx.fillText("L " + line.id,
                          line.p1.x + 2*line.delta.x/3 + line.normal.x*10,
                          line.p1.y + 2*line.delta.y/3 + line.normal.y*10);
         }
         if (state.view.showSideNumbers) {
             ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
             ctx.fillText("S " + line.front.id,
                          line.p1.x + line.delta.x/2 + line.normal.x*15,
                          line.p1.y + line.delta.y/2 + line.normal.y*15);
@@ -175,10 +203,21 @@ function draw(state) {
 
     ctx.restore();
 
+    state.stats.frameCount += 1;
+    var now = Date.now();
+    if (now - state.stats.lastFPSTimestamp > 2000) {
+	state.stats.FPS = state.stats.frameCount * 1000 / (now - state.stats.lastFPSTimestamp);
+	state.stats.frameCount = 0;
+	state.stats.lastFPSTimestamp = now;
+    }
+
     // Draw FPS indicator after restoring, because we don't want it
     // transformed.
     ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
     ctx.fillText("FPS: " + state.stats.FPS, 10, 20);
+    ctx.fillText("TPS: " + state.stats.TPS, 10, 40);
 }
 
 function updateActorBbox(actor) {
@@ -213,26 +252,24 @@ function updatePlayer(state) {
     var vx = 0,
         vy = 0;
 
+    state.stats.tickCount += 1;
+    var now = Date.now();
+    if (now - state.stats.lastTPSTimestamp > 2000) {
+	state.stats.TPS = state.stats.tickCount * 1000 / (now - state.stats.lastTPSTimestamp);
+	state.stats.tickCount = 0;
+	state.stats.lastTPSTimestamp = now;
+    }
+
     state.player.velocity -= state.player.moveAccel/2;
     if (state.player.velocity < 0.1) {
         state.player.velocity = 0;
     }
 
-    state.stats.frameCount += 1;
-    var now = Date.now();
-    if (now - state.stats.lastFPSTimestamp > 2000) {
-	state.stats.FPS = state.stats.frameCount * 1000 / (now - state.stats.lastFPSTimestamp);
-	state.stats.frameCount = 0;
-	state.stats.lastFPSTimestamp = now;
-    }
-
     if (state.input.turnLeft) {
         state.player.angle -= state.player.turnSpeed;
-        state.redraw = true;
     }
     if (state.input.turnRight) {
         state.player.angle += state.player.turnSpeed;
-        state.redraw = true;
     }
     if (state.input.moveForward) {
         vx += Math.cos(state.player.angle) * state.player.moveAccel;
@@ -267,6 +304,12 @@ function updatePlayer(state) {
         collisionResolve(state, state.player, vx, vy);
     }
 
+    if (state.player.sector != null && state.player.height > state.player.sector.floor) {
+        state.player.height -= 4;
+    }
+    if (state.player.sector != null && state.player.height < state.player.sector.floor) {
+        state.player.height = state.player.sector.floor;
+    }
 }
 
 function updateMonsters(state) {
@@ -297,39 +340,39 @@ function updateMonsters(state) {
 	    }
 	    break;
 	}
+        if (monster.sector != null && monster.height > monster.sector.floor) {
+            monster.height -= 4;
+        }
+        if (monster.sector != null && monster.height < monster.sector.floor) {
+            monster.height = monster.sector.floor;
+        }
     }
 }
 
-function updateView(state) {
+function processViewInput(state) {
     if (state.input.zoomIn) {
         state.view.scale *= 1.1;
         if (state.view.scale > 10) {
             state.view.scale = 10;
         }
-        state.redraw = true;
     }
     if (state.input.zoomOut) {
         state.view.scale /= 1.1;
         if (state.view.scale < 0.1) {
             state.view.scale = 0.1;
         }
-        state.redraw = true;
     }
     if (state.input.panLeft) {
         state.view.offset.x += 10;
-        state.redraw = true;
     }
     if (state.input.panRight) {
         state.view.offset.x -= 10;
-        state.redraw = true;
     }
     if (state.input.panUp) {
         state.view.offset.y += 10;
-        state.redraw = true;
     }
     if (state.input.panDown) {
         state.view.offset.y -= 10;
-        state.redraw = true;
     }
 }
 
@@ -338,7 +381,10 @@ function updateState(state) {
     updatePlayer(state);
     updateMonsters(state);
     updateBboxes(state);
-    updateView(state);
+}
+
+function processInput(state) {
+    processViewInput(state);
 }
 
 function projectPointToLine(p, line) {
@@ -405,10 +451,6 @@ function collisionResolve(state, mob, dx, dy) {
     for (i = 0; i < state.lines.length; i++) {
         var line = state.lines[i];
 
-	if (line.twosided) {
-//	    continue;
-	}
-
         var dp = dotProd(dx, dy, line.normal.x, line.normal.y);
         if (dp < 0) {
             // Player is moving towards the front of the line.
@@ -434,19 +476,37 @@ function collisionResolve(state, mob, dx, dy) {
         for (i = 0; i < state.lines.length; i++) {
             var line = state.lines[i];
 
-	    if (line.twosided) {
-		continue;
-	    }
+            if (bboxIntersect(line.bbox, {l: mob.bbox.l + dx,
+                                          r: mob.bbox.r + dx,
+                                          t: mob.bbox.t + dy,
+                                          b: mob.bbox.b + dy})) {
+                var newX = mob.pos.x + dx,
+                    newY = mob.pos.y + dy;
 
-            var dp = dotProd(dx, dy, line.normal.x, line.normal.y);
-            if (dp < 0) {
-                // Player is moving towards the front of the line.
+                if (line.twosided) {
+                    var newSide = sideOfLine(line, newX, newY);
 
-                var newPlayerPos = {x: mob.pos.x + dx,
-                                    y: mob.pos.y + dy};
+                    if (newSide === 0) {
+                        continue;
+                    }
+                    var otherSide = newSide < 0 ? line.front : line.back;
+
+                    var otherFloor = otherSide.sector.floor,
+                        otherCeiling = otherSide.sector.ceiling;
+                    if (otherFloor - mob.height < mob.stepHeight &&
+                        otherCeiling > mob.height + mob.size) {
+                        continue;
+                    }
+                }
+                var newPlayerPos = {x: newX,
+                                    y: newY};
                 var projected = projectPointToLine(newPlayerPos, line);
                 var projectedDist = pDist(newPlayerPos, projected);
 
+                if (projectedDist == 0) {
+                    console.log("!!! dx", dx, "dy", dy);
+                    return true;
+                }
                 if (projectedDist < mob.radius) {
                     var correction = {x: newPlayerPos.x - projected.x,
                                       y: newPlayerPos.y - projected.y};
@@ -458,10 +518,6 @@ function collisionResolve(state, mob, dx, dy) {
                     changed = true;
 		    collisionDetected = true;
                 }
-            } else {
-                // Player is moving parallel to line or towards back of
-                // line. The latter is forbidden - the player may not move
-                // on tha back of a wall.
             }
         }
     }
@@ -469,10 +525,33 @@ function collisionResolve(state, mob, dx, dy) {
 	return true;
     }
 
-    mob.pos.x += dx;
-    mob.pos.y += dy;
-    state.redraw = true;
+    if (dx != 0 || dy != 0) {
+        for (i = 0; i < state.lines.length; i++) {
+            var line = state.lines[i];
+
+	    if (line.twosided && bboxIntersect(line.bbox, {l: mob.bbox.l + dx,
+                                                           r: mob.bbox.r + dx,
+                                                           t: mob.bbox.t + dy,
+                                                           b: mob.bbox.b + dy})) {
+                var newX = mob.pos.x + dx,
+                    newY = mob.pos.y + dy;
+                var oldSide = sideOfLine(line, mob.pos.x, mob.pos.y);
+                var newSide = sideOfLine(line, newX, newY);
+
+                if (oldSide != newSide && oldSide != 0) {
+                    var thisSide = newSide > 0 ? line.front : line.back;
+                    mob.sector = thisSide.sector;
+	        }
+            }
+        }
+        mob.pos.x += dx;
+        mob.pos.y += dy;
+    }
     return collisionDetected;
+}
+
+function sideOfLine(line, x, y) {
+    return Math.sign((line.p2.x - line.p1.x)*(y - line.p1.y) - (line.p2.y - line.p1.y)*(x - line.p1.x));
 }
 
 function keyDownHandler(state, e) {
@@ -567,6 +646,9 @@ function keyUpHandler(state, e) {
 	    startLoop(state);
         }
 	break;
+    case 88: // X
+        state.view.debug = !state.view.debug;
+	break;
     default:
 	console.log('key up', e.which);
 	break;
@@ -658,7 +740,7 @@ function start() {
 		p2 = vertices[linedef.end];
             var rSide = sides[linedef.right],
                 lSide = linedef.left !== null ? sides[linedef.left] : null;
-            
+
 	    var line = {id: i,
                         p1: {x: p1.x - shiftX, y: -p1.y - shiftY},
 		        p2: {x: p2.x - shiftX, y: -p2.y - shiftY},
@@ -683,11 +765,16 @@ function start() {
 			       bbox: {},
 			       tick: 0,
 			       moveSpeed: 5,
-			       state: "thinking"});
+			       state: "thinking",
+                               sector: null,
+                               height: 0,
+                               size: 64,
+                               stepHeight: 24
+                              });
 	    }
         }
     }
-    
+
     /* Calculate some useful values per line. */
     for (i = 0; i < lines.length; i++) {
         var line = lines[i];
@@ -714,8 +801,9 @@ function start() {
         running: true,
 	update: updateState,
 	draw: draw,
-        redraw: true,
+        processInput: processInput,
         view: {
+            debug: false,
             canvas: canvas,
             ctx: canvas.getContext('2d'),
             width: width,
@@ -728,7 +816,8 @@ function start() {
 	    showFov: false,
             showLineNumbers: false,
             showSideNumbers: false,
-	    showBbox: false
+	    showBbox: false,
+            showCurrentSector: true
         },
         input: {
             moveBackward: false,
@@ -748,14 +837,18 @@ function start() {
             pos: playerpos,
             angle: 3*Math.PI/2,
             radius: 20,
-            turnSpeed: 0.05,
-            moveSpeed: 8,
+            turnSpeed: 0.1,
+            moveSpeed: 18,
             velocity: 0,
             moveAngle: 0,
-            moveAccel: 1,
+            moveAccel: 2,
             fov: 60*Math.PI/180,
             viewRange: 400,
-	    bbox: {}
+	    bbox: {},
+            sector: null,
+            height: 0,
+            size: 64,
+            stepHeight: 24
         },
         lines: lines,
         sides: sides,
@@ -763,7 +856,10 @@ function start() {
 	monsters: monsters,
 	stats: {lastFPSTimestamp: Date.now()-1500,
 		frameCount: 0,
-		FPS: 0}
+		FPS: 0,
+                lastTPSTimestamp: Date.now() - 1500,
+                tickCount: 0,
+                TPS: 0}
     };
 
     document.addEventListener('keyup', function(e) { keyUpHandler(state, e); });
