@@ -89,19 +89,6 @@ function drawActor(state, actor, color) {
     ctx.beginPath();
     ctx.arc(actor.pos.x + Math.cos(actor.moveAngle) * actor.velocity, actor.pos.y + Math.sin(actor.moveAngle) * actor.velocity, actor.radius, 0, 2*Math.PI);
     ctx.fill();
-    if (actor.corrections.length > 0) {
-	var cx = actor.pos.x + Math.cos(actor.moveAngle) * actor.velocity,
-	    cy = actor.pos.y + Math.sin(actor.moveAngle) * actor.velocity;
-	ctx.beginPath();
-	ctx.strokeStyle = 'white';
-	ctx.moveTo(cx, cy);
-	actor.corrections.forEach(function(corr) {
-	    cx += corr.x;
-	    cy += corr.y;
-	    ctx.lineTo(cx, cy);
-	});
-	ctx.stroke();
-    }
 
     if (state.view.showCurrentSector) {
         ctx.fillStyle = 'black';
@@ -169,7 +156,7 @@ function draw(state) {
     if (state.showSectors) {
 	state.sectors.forEach(function(sec) {
 	    drawBBox(state, sec.bbox);
-	
+
             ctx.font = 'bold 10px sans-serif';
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'center';
@@ -222,7 +209,7 @@ function draw(state) {
 		ctx.lineTo(line.p1.x + line.delta.x/2 + line.normal.x*10, line.p1.y + line.delta.y/2 + line.normal.y*10);
 	    }
             ctx.stroke();
-	    
+
 	    if (state.view.showNormals) {
 		if (line.front.sector === state.player.sector) {
 		    ctx.beginPath();
@@ -239,9 +226,9 @@ function draw(state) {
 		    ctx.stroke();
 		}
 	    }
-	    
+
 	    drawBBox(state, line.bbox);
-	    
+
             if (state.view.showLineNumbers) {
 		ctx.font = 'bold 10px sans-serif';
 		ctx.textBaseline = 'middle';
@@ -262,24 +249,6 @@ function draw(state) {
 				 line.p1.x + line.delta.x/2 - line.normal.x*15,
 				 line.p1.y + line.delta.y/2 - line.normal.y*15);
 		}
-            }
-
-            if (state.view.showProjected && line.projected) {
-		if (line.projectedDist <= player.radius) {
-                    ctx.fillStyle = 'red';
-                    ctx.beginPath();
-                    ctx.arc(line.projected.x, line.projected.y, 10, 0, 2*Math.PI);
-                    ctx.fill();
-            }
-		ctx.beginPath();
-		ctx.strokeStyle = 'red';
-		ctx.arc(line.projected.x, line.projected.y, 10, 0, 2*Math.PI);
-		ctx.stroke();
-		
-		ctx.beginPath();
-		ctx.moveTo(player.pos.x, player.pos.y);
-		ctx.lineTo(line.projected.x, line.projected.y);
-		ctx.stroke();
             }
 	}
     }
@@ -338,10 +307,7 @@ function updatePlayer(state) {
     var vx = 0,
         vy = 0;
 
-    state.player.velocity -= state.player.moveAccel/2;
-    if (state.player.velocity < 0.1) {
-        state.player.velocity = 0;
-    }
+    var playerMoved = false;
 
     if (state.input.turnLeft) {
         state.player.angle -= state.player.turnSpeed;
@@ -352,18 +318,29 @@ function updatePlayer(state) {
     if (state.input.moveForward) {
         vx += Math.cos(state.player.angle) * state.player.moveAccel;
         vy += Math.sin(state.player.angle) * state.player.moveAccel;
+        playerMoved = true;
     }
     if (state.input.moveBackward) {
         vx -= Math.cos(state.player.angle) * state.player.moveAccel;
         vy -= Math.sin(state.player.angle) * state.player.moveAccel;
+        playerMoved = true;
     }
     if (state.input.strafeLeft) {
         vx += Math.cos(state.player.angle - Math.PI/2) * state.player.moveAccel;
         vy += Math.sin(state.player.angle - Math.PI/2) * state.player.moveAccel;
+        playerMoved = true;
     }
     if (state.input.strafeRight) {
         vx += Math.cos(state.player.angle + Math.PI/2) * state.player.moveAccel;
         vy += Math.sin(state.player.angle + Math.PI/2) * state.player.moveAccel;
+        playerMoved = true;
+    }
+
+    if (!playerMoved) {
+        state.player.velocity -= state.player.moveDecel;
+        if (state.player.velocity < 0.1) {
+            state.player.velocity = 0;
+        }
     }
 
     vx += Math.cos(state.player.moveAngle) * state.player.velocity;
@@ -456,11 +433,11 @@ function processViewInput(state) {
 
 function updateState(state) {
     // Maintain some statistics.
-    
+
     // tickCount counts the invocations since we last updated the TPS
     // value.
     state.stats.tickCount += 1;
-    // tics counts the total invocations since game start. 
+    // tics counts the total invocations since game start.
     state.stats.tics += 1;
     var now = Date.now();
     if (now - state.stats.lastTPSTimestamp > 2000) {
@@ -508,6 +485,25 @@ function projectPointToLine(p, line) {
     }
 }
 
+function projectPointToLineExternal(p, line) {
+    var ABx = line.delta.x;
+    var ABy = line.delta.y;
+    var ABSquared = dotProd(ABx, ABy, ABx, ABy);
+    if (ABSquared == 0) {
+        return null;
+    } else {
+        var Apx = p.x - line.p1.x;
+        var Apy = p.y - line.p1.y;
+        var t = dotProd(Apx, Apy, ABx, ABy) / ABSquared;
+
+        return {
+	    x: line.p1.x + t * ABx,
+	    y: line.p1.y + t * ABy,
+	    t: t
+	};
+    }
+}
+
 /* Check for a collision between the player/monster `mob' and all
  * other players and monsters. If `mob' would collide with any other
  * player/monster when moving by (dx,dy), return true; otherwise
@@ -543,40 +539,13 @@ function collideMob(state, mob, dx, dy) {
  * `mob' is not moved at all.  */
 function collisionResolve(state, mob, dx, dy) {
     var changed = true,
-        iterations = 1;
+        iterations = 2;
     var collisionDetected = false;
 
-    if (mob === state.player) {
-	state.lines.forEach(function(line) {
-
-            var dp = dotProd(dx, dy, line.normal.x, line.normal.y);
-            if (dp < 0) {
-		// Player is moving towards the front of the line.
-		line.checkColliding = true;
-
-		var newPlayerPos = {x: mob.pos.x + dx,
-                                    y: mob.pos.y + dy};
-		line.projected = projectPointToLine(newPlayerPos, line);
-		line.projectedDist = pDist(newPlayerPos, line.projected);
-
-            } else {
-		line.checkColliding = false;
-		line.projectedDist = 0;
-		line.projected = null;
-            }
-	});
-    }
-
-    mob.corrections = [];
-    var oldX = mob.pos.x,
-	oldY = mob.pos.y;
     while (changed && iterations > 0) {
         changed = false;
         iterations -= 1;        // Make sure we terminate, even for
                                 // crazy maps.
-
-	var newX = mob.pos.x + dx,
-            newY = mob.pos.y + dy;
 
 	state.lines.forEach(function(line) {
 
@@ -586,13 +555,14 @@ function collisionResolve(state, mob, dx, dy) {
                                           t: mob.bbox.t + dy,
                                           b: mob.bbox.b + dy})) {
                 if (line.twosided) {
-                    var oldSide = sideOfLine(line, oldX, oldY);
-                    var newSide = sideOfLine(line, newX, newY);
+                    var oldSide = sideOfLine(line, mob.pos.x, mob.pos.y);
+                    var newSide = sideOfLine(line, mob.pos.x + dx, mob.pos.y + dy);
 
                     if (newSide === 0 && oldSide === 0) {
 			// We stepped on the line, but did not cross it.
                         skip = true;
                     }
+
                     var otherSide = newSide < 0 ? line.front : line.back;
 
                     var otherFloor = otherSide.sector.floor,
@@ -605,21 +575,17 @@ function collisionResolve(state, mob, dx, dy) {
 		}
 
 		if (!skip) {
-                    var newPlayerPos = {x: newX, y: newY};
-                    var projected = projectPointToLine(newPlayerPos, line);
+                    var newPlayerPos = {x: mob.pos.x + dx, y: mob.pos.y + dy};
+                    var projected = projectPointToLineExternal(newPlayerPos, line);
                     var projectedDist = pDist(newPlayerPos, projected);
 
                     if (projectedDist == 0) {
 			console.log("!!! dx", dx, "dy", dy);
 			return true;
                     }
-                    if (projectedDist < mob.radius) {
-			var correction = {x: newPlayerPos.x - projected.x,
-					  y: newPlayerPos.y - projected.y};
-			var corrLen = vLength(correction);
-			var corrX = (correction.x / corrLen) * (mob.radius - projectedDist),
-                            corrY = (correction.y / corrLen) * (mob.radius - projectedDist);
-			mob.corrections.push({x: corrX, y: corrY});
+                    if (projected.t >= 0 && projected.t <= 1 && projectedDist < mob.radius) {
+                        var corrX = line.normal.x *  (mob.radius - projectedDist);
+                        var corrY = line.normal.y *  (mob.radius - projectedDist);
 			dx += corrX;
 			dy += corrY;
 			changed = true;
@@ -628,8 +594,6 @@ function collisionResolve(state, mob, dx, dy) {
 		}
             }
         });
-	oldX = newX;
-	oldY = newY;
     }
     if (collideMob(state, mob, dx, dy)) {
 	return true;
@@ -816,7 +780,7 @@ function start() {
         sectors = [];
         sides = [];
         lines = [];
-	
+
         for (i = 0; i < level_E1M1.sectors.length; i++) {
             var sectordef = level_E1M1.sectors[i];
             var sector = {id: i,
@@ -908,8 +872,7 @@ function start() {
                                sector: null,
                                height: 0,
                                size: 56,
-                               stepHeight: 24,
-			       corrections: []
+                               stepHeight: 24
                               });
 	    }
         }
@@ -947,7 +910,7 @@ function start() {
 		     t: Math.min(side.p1.y, side.p2.y),
 		     b: Math.max(side.p1.y, side.p2.y)};
     });
-    
+
     var xscale = width / (maxx - minx),
         yscale = height / (maxy - miny);
     var scale = xscale < yscale ? xscale : yscale;
@@ -967,7 +930,6 @@ function start() {
             offset: {x: width / 2, y: height / 2},
             relative: true,
 	    showNormals: true,
-	    showProjected: false,
 	    showFov: false,
             showLineNumbers: false,
             showSideNumbers: false,
@@ -999,14 +961,14 @@ function start() {
             velocity: 0,
             moveAngle: 0,
             moveAccel: 2,
+            moveDecel: 2,
             fov: 60*Math.PI/180,
             viewRange: 400,
 	    bbox: {},
             sector: null,
             height: 0,
             size: 56,
-            stepHeight: 24,
-	    corrections: []
+            stepHeight: 24
         },
         lines: lines,
         sides: sides,
@@ -1025,7 +987,7 @@ function start() {
     state.monsters.forEach(function(m) {
 	m.sector = findSector(state, m.pos.x, m.pos.y);
     });
-				     
+
     document.addEventListener('keyup', function(e) { keyUpHandler(state, e); });
     document.addEventListener('keydown', function(e) { keyDownHandler(state, e);});
 
