@@ -84,12 +84,6 @@ function drawActor(state, actor, color) {
                actor.pos.y + Math.sin(actor.angle) * (actor.radius + 5));
     ctx.stroke();
 
-    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath();
-    ctx.arc(actor.pos.x + Math.cos(actor.moveAngle) * actor.velocity, actor.pos.y + Math.sin(actor.moveAngle) * actor.velocity, actor.radius, 0, 2*Math.PI);
-    ctx.fill();
-
     if (state.view.showCurrentSector) {
         ctx.fillStyle = 'black';
         ctx.font = 'bold 10px sans-serif';
@@ -102,6 +96,23 @@ function drawActor(state, actor, color) {
 
 /* Draw the current frame.  */
 function draw(state) {
+    state.stats.frameCount += 1;
+    var now = Date.now();
+    if (now - state.stats.lastFPSTimestamp > 2000) {
+	state.stats.FPS = state.stats.frameCount * 1000 / (now - state.stats.lastFPSTimestamp);
+	state.stats.frameCount = 0;
+	state.stats.lastFPSTimestamp = now;
+    }
+
+    if (state.view.showThreeD) {
+        drawThreeD(state);
+    }
+    if (state.view.showMap) {
+        drawMap(state);
+    }
+}
+
+function drawMap(state) {
     var i;
     var ctx = state.view.ctx;
     var player = state.player;
@@ -262,21 +273,45 @@ function draw(state) {
 
     ctx.restore();
 
-    state.stats.frameCount += 1;
-    var now = Date.now();
-    if (now - state.stats.lastFPSTimestamp > 2000) {
-	state.stats.FPS = state.stats.frameCount * 1000 / (now - state.stats.lastFPSTimestamp);
-	state.stats.frameCount = 0;
-	state.stats.lastFPSTimestamp = now;
-    }
-
     // Draw FPS indicator after restoring, because we don't want it
     // transformed.
     ctx.font = 'bold 14px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText("FPS: " + state.stats.FPS, 10, 20);
-    ctx.fillText("TPS: " + state.stats.TPS, 10, 40);
+    ctx.fillText("FPS: " + state.stats.FPS.toFixed(1), 4, 16);
+    ctx.fillText("TPS: " + state.stats.TPS.toFixed(1), 4, 32);
+}
+
+function drawThreeD(state) {
+    var ctx = state.view.threeDctx;
+
+    ctx.clearRect(0, 0, state.view.threeDwidth, state.view.threeDheight);
+
+    ctx.save();
+
+    ctx.strokeStyle = 'black';
+    ctx.strokeRect(0, 0, state.view.threeDwidth, state.view.threeDheight);
+
+    var fov2 = state.player.fov/2;
+    var deltaAngle = state.player.fov/state.view.threeDwidth;
+
+    for (var column = 0, angle = -fov2; column < state.view.threeDwidth; column++, angle += deltaAngle) {
+        ctx.strokeStyle = 'black';
+        ctx.beginPath();
+        ctx.moveTo(column, 0);
+        ctx.lineTo(column, state.view.threeDheight-1);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    if (!state.view.showMap) {
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText("FPS: " + state.stats.FPS.toFixed(1), 4, 10);
+        ctx.fillText("TPS: " + state.stats.TPS.toFixed(1), 4, 20);
+    }
 }
 
 function updateActorBbox(actor) {
@@ -538,13 +573,14 @@ function collideMob(state, mob, dx, dy) {
  * wall), true otherwise.  Note: when colliding with a player/monster,
  * `mob' is not moved at all.  */
 function collisionResolve(state, mob, dx, dy) {
+    var MAX_ITERATIONS = 3;
     var changed = true,
-        iterations = 2;
+        iterations = 0;
     var collisionDetected = false;
 
-    while (changed && iterations > 0) {
+    while (changed && iterations < MAX_ITERATIONS) {
         changed = false;
-        iterations -= 1;        // Make sure we terminate, even for
+        iterations += 1;        // Make sure we terminate, even for
                                 // crazy maps.
 
 	state.lines.forEach(function(line) {
@@ -736,12 +772,20 @@ function start() {
     var doomMap = true;
     var width = 800;
     var height = 600;
+    var threeDwidth = 320;
+    var threeDheight = 200;
     var i;
 
     var giantNumber = 1000000000;
     var canvas = document.getElementById("main-canvas");
     canvas.width = width;
     canvas.height = height;
+
+    var threeDcanvas = document.getElementById("three-d-canvas");
+    threeDcanvas.width = threeDwidth;
+    threeDcanvas.height = threeDheight;
+    threeDcanvas.style.width = (threeDwidth * 2) + 'px';
+    threeDcanvas.style.height = (threeDheight * 2) + 'px';
 
     var monsters = [];
     var playerpos = {x: 0, y: 0},
@@ -924,19 +968,25 @@ function start() {
             debug: false,
             canvas: canvas,
             ctx: canvas.getContext('2d'),
+            threeDcanvas: threeDcanvas,
+            threeDctx: threeDcanvas.getContext('2d'),
             width: width,
             height: height,
+            threeDwidth: threeDwidth,
+            threeDheight: threeDheight,
             scale: scale,
             offset: {x: width / 2, y: height / 2},
             relative: true,
-	    showNormals: true,
+	    showNormals: false,
 	    showFov: false,
             showLineNumbers: false,
             showSideNumbers: false,
 	    showBbox: false,
-            showCurrentSector: true,
+            showCurrentSector: false,
 	    showLines: true,
 	    showSectors: false,
+            showThreeD: true,
+            showMap: true
         },
         input: {
             moveBackward: false,
