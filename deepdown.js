@@ -5,6 +5,45 @@
  * See the file LICENSE for licensing information.
  */
 
+/** Line segment intersection test.  Returns null when the lines
+ * p0--p1 and p2--p3 do not intersect. Returns an object with
+ * attributes x and y representing the intersection point when they do
+ * intersect.
+ *
+ * From Keith Peters, Coding Math, Episode 34. Source code taken from
+ * https://github.com/bit101/CodingMath/blob/master/episode34/shapes.js
+*/
+function segmentIntersect(p0, p1, p2, p3) {
+    var A1 = p1.y - p0.y,
+	B1 = p0.x - p1.x,
+	C1 = A1 * p0.x + B1 * p0.y,
+	A2 = p3.y - p2.y,
+	B2 = p2.x - p3.x,
+	C2 = A2 * p2.x + B2 * p2.y,
+	denominator = A1 * B2 - A2 * B1;
+
+    if(denominator == 0) {
+	return null;
+    }
+
+    var intersectX = (B2 * C1 - B1 * C2) / denominator,
+	intersectY = (A1 * C2 - A2 * C1) / denominator,
+	rx0 = (intersectX - p0.x) / (p1.x - p0.x),
+	ry0 = (intersectY - p0.y) / (p1.y - p0.y),
+	rx1 = (intersectX - p2.x) / (p3.x - p2.x),
+	ry1 = (intersectY - p2.y) / (p3.y - p2.y);
+
+    if(((rx0 >= 0 && rx0 <= 1) || (ry0 >= 0 && ry0 <= 1)) &&
+       ((rx1 >= 0 && rx1 <= 1) || (ry1 >= 0 && ry1 <= 1))) {
+	return {
+	    x: intersectX,
+	    y: intersectY
+	};
+    } else {
+	return null;
+    }
+}
+
 /* Dot product between the vectors (x0,y0) and (x1,y1).  */
 function dotProd(x0, y0, x1, y1) {
     return x0 * x1 + y0 * y1;
@@ -296,11 +335,7 @@ function drawThreeD(state) {
     var deltaAngle = state.player.fov/state.view.threeDwidth;
 
     for (var column = 0, angle = -fov2; column < state.view.threeDwidth; column++, angle += deltaAngle) {
-        ctx.strokeStyle = 'black';
-        ctx.beginPath();
-        ctx.moveTo(column, 0);
-        ctx.lineTo(column, state.view.threeDheight-1);
-        ctx.stroke();
+        drawColumn(state, state.player.sector, column, angle, 0, state.view.threeDheight-1);
     }
     ctx.restore();
 
@@ -312,6 +347,66 @@ function drawThreeD(state) {
         ctx.fillText("FPS: " + state.stats.FPS.toFixed(1), 4, 10);
         ctx.fillText("TPS: " + state.stats.TPS.toFixed(1), 4, 20);
     }
+}
+
+function drawColumn(state, sector, column, angle, windowTop, windowBot) {
+    if (windowTop > windowBot) {
+        return;
+    }
+//    console.log("sector", sector.id, "column", column, "windowTop", windowTop, "windowBot", windowBot);
+    var player = state.player,
+        ctx = state.view.threeDctx;
+
+    var dx = Math.cos(player.angle + angle),
+        dy = Math.sin(player.angle + angle),
+        p0 = player.pos,
+        p1 = {x: player.pos.x + dx * player.viewRange, y: player.pos.y + dy * player.viewRange};
+    var collisions = [];
+    function insert(coll) {
+        var i = 0;
+        while (i < collisions.length) {
+            if (coll.dist > collisions[i].dist) {
+                collisions.splice(i, 0, coll);
+                return;
+            }
+            i += 1;
+        }
+        collisions.push(coll);
+    }
+    sector.sides.forEach(function(side) {
+        var dp = dotProd(dx, dy, side.normal.x, side.normal.y);
+        if (dp < 0) {
+            var intersection = segmentIntersect(p0, p1, side.p1, side.p2);
+            if (intersection != null) {
+                var dist = pDist(intersection, player.pos) * Math.cos(angle);
+                var shade = 255 - ((dist * 255 / player.viewRange) | 0);
+                var colHeight = 20 * player.viewRange/ dist;
+                var colTop = Math.max(state.view.threeDheight/2 - colHeight / 2, windowTop),
+                    colBot = Math.min(state.view.threeDheight/2 + colHeight / 2, windowBot);
+                insert({dist: dist,
+                        colTop: colTop,
+                        colBot: colBot,
+                        shade: shade,
+                        twosided: side.line.twosided,
+                        side: side,
+                        column: column,
+                        angle: angle});
+            }
+        }
+    });
+    collisions.forEach(function(coll) {
+        if (coll.twosided) {
+            var otherSide = coll.side.line.front === coll.side ? coll.side.line.back : coll.side.line.front,
+                otherSector = otherSide.sector;
+//            drawColumn(state, otherSector, coll.column, coll.angle, coll.colTop+1, coll.colBot-1);
+        } else {
+            ctx.beginPath();
+            ctx.strokeStyle = 'rgb(' + coll.shade + ',' + coll.shade + ',' + coll.shade + ')';
+            ctx.moveTo(column+0.5, coll.colTop);
+            ctx.lineTo(column+0.5, coll.colBot);
+            ctx.stroke();
+        }
+    });
 }
 
 function updateActorBbox(actor) {
@@ -978,7 +1073,7 @@ function start() {
             offset: {x: width / 2, y: height / 2},
             relative: true,
 	    showNormals: false,
-	    showFov: false,
+	    showFov: true,
             showLineNumbers: false,
             showSideNumbers: false,
 	    showBbox: false,
@@ -1013,11 +1108,12 @@ function start() {
             moveAccel: 2,
             moveDecel: 2,
             fov: 60*Math.PI/180,
-            viewRange: 400,
+            viewRange: 2000,
 	    bbox: {},
             sector: null,
             height: 0,
             size: 56,
+            eyeLevel: 50,
             stepHeight: 24
         },
         lines: lines,
