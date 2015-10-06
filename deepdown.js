@@ -335,7 +335,7 @@ function drawThreeD(state) {
     var deltaAngle = state.player.fov/state.view.threeDwidth;
 
     for (var column = 1, angle = -fov2; column < state.view.threeDwidth-1; column++, angle += deltaAngle) {
-        drawColumn(state, state.player.sector, column, angle, 0, state.view.threeDheight-1);
+        drawColumn(state, state.player.sector, column, angle, 0, state.view.threeDheight-1, 0);
     }
     ctx.restore();
 
@@ -349,7 +349,10 @@ function drawThreeD(state) {
     }
 }
 
-function drawColumn(state, sector, column, angle, windowTop, windowBot) {
+function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
+    if (depth > 10) {
+	return;
+    }
     if (windowTop > windowBot) {
         return;
     }
@@ -396,40 +399,43 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot) {
 	var eyeHeight = player.eyeLevel+player.height;
         var colTop = Math.max(horizon + (heightFactor*(eyeHeight-coll.sector.ceiling)), coll.windowTop),
             colBot = Math.min(horizon + (heightFactor*(eyeHeight-coll.sector.floor)), coll.windowBot);
+        ctx.beginPath();
+	ctx.strokeStyle = 'rgb(20,200,100)';
+        ctx.moveTo(coll.column+0.5, windowTop+0.5);
+        ctx.lineTo(coll.column+0.5, colTop+0.5);
+        ctx.moveTo(coll.column+0.5, colBot+0.5);
+        ctx.lineTo(coll.column+0.5, windowBot+0.5);
+        ctx.stroke();
         if (coll.side.line.twosided) {
             var otherSide = coll.side.line.front === coll.side ? coll.side.line.back : coll.side.line.front,
                 otherSector = otherSide.sector;
             if (otherSector.ceiling < coll.sector.ceiling) {
-		var middleTop = Math.max(horizon - (heightFactor*(player.eyeLevel+player.height+otherSector.ceiling)), coll.windowTop)
+		var middleTop = Math.max(horizon + (heightFactor*(eyeHeight - otherSector.ceiling)), coll.windowTop)
 		ctx.beginPath();
 		ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
-		ctx.moveTo(coll.column+0.5, colTop);
-		ctx.lineTo(coll.column+0.5, middleTop);
+		ctx.moveTo(coll.column+0.5, colTop+0.5);
+		ctx.lineTo(coll.column+0.5, middleTop+0.5);
 		ctx.stroke();
+		colTop = middleTop;
 	    }
 	    if( otherSector.floor > coll.sector.floor) {
-		var middleBot = Math.min(horizon + (heightFactor*(player.eyeLevel+player.height-otherSector.floor)), coll.windowBot)
+		var middleBot = Math.min(horizon + (heightFactor*(eyeHeight - otherSector.floor)), coll.windowBot)
 		ctx.beginPath();
 		ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
-		ctx.moveTo(coll.column+0.5, middleBot);
-		ctx.lineTo(coll.column+0.5, colBot);
+		ctx.moveTo(coll.column+0.5, middleBot+0.5);
+		ctx.lineTo(coll.column+0.5, colBot+0.5);
 		ctx.stroke();
+		colBot = middleBot;
 	    }
-            drawColumn(state, otherSector, coll.column, coll.angle, colTop+1, colBot-1);
+//	    console.log(otherSector.id, coll.column, coll.angle, colTop+1, colBot-1);
+            drawColumn(state, otherSector, coll.column, coll.angle, colTop, colBot, depth+1);
         } else {
             ctx.beginPath();
 	    ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
-            ctx.moveTo(coll.column+0.5, colTop);
-            ctx.lineTo(coll.column+0.5, colBot);
+            ctx.moveTo(coll.column+0.5, colTop+0.5);
+            ctx.lineTo(coll.column+0.5, colBot+0.5);
             ctx.stroke();
         }
-        ctx.beginPath();
-	ctx.strokeStyle = 'rgb(20,200,100)';
-        ctx.moveTo(coll.column+0.5, windowTop);
-        ctx.lineTo(coll.column+0.5, colTop);
-        ctx.moveTo(coll.column+0.5, colBot);
-        ctx.lineTo(coll.column+0.5, windowBot);
-        ctx.stroke();
     });
 }
 
