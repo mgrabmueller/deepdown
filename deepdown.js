@@ -334,7 +334,7 @@ function drawThreeD(state) {
     var fov2 = state.player.fov/2;
     var deltaAngle = state.player.fov/state.view.threeDwidth;
 
-    for (var column = 0, angle = -fov2; column < state.view.threeDwidth; column++, angle += deltaAngle) {
+    for (var column = 1, angle = -fov2; column < state.view.threeDwidth-1; column++, angle += deltaAngle) {
         drawColumn(state, state.player.sector, column, angle, 0, state.view.threeDheight-1);
     }
     ctx.restore();
@@ -357,6 +357,7 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot) {
     var player = state.player,
         ctx = state.view.threeDctx;
 
+    var horizon = state.view.threeDheight / 2;
     var dx = Math.cos(player.angle + angle),
         dy = Math.sin(player.angle + angle),
         p0 = player.pos,
@@ -379,33 +380,56 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot) {
             var intersection = segmentIntersect(p0, p1, side.p1, side.p2);
             if (intersection != null) {
                 var dist = pDist(intersection, player.pos) * Math.cos(angle);
-                var shade = 255 - ((dist * 255 / player.viewRange) | 0);
-                var colHeight = 20 * player.viewRange/ dist;
-                var colTop = Math.max(state.view.threeDheight/2 - colHeight / 2, windowTop),
-                    colBot = Math.min(state.view.threeDheight/2 + colHeight / 2, windowBot);
                 insert({dist: dist,
-                        colTop: colTop,
-                        colBot: colBot,
-                        shade: shade,
-                        twosided: side.line.twosided,
                         side: side,
                         column: column,
-                        angle: angle});
+                        angle: angle,
+			sector: sector,
+			windowTop: windowTop,
+			windowBot: windowBot});
             }
         }
     });
     collisions.forEach(function(coll) {
-        if (coll.twosided) {
+        var shade = 245 - ((coll.dist * 245 / player.viewRange) | 0);
+	var heightFactor = 0.12*player.viewRange / coll.dist;
+	var eyeHeight = player.eyeLevel+player.height;
+        var colTop = Math.max(horizon + (heightFactor*(eyeHeight-coll.sector.ceiling)), coll.windowTop),
+            colBot = Math.min(horizon + (heightFactor*(eyeHeight-coll.sector.floor)), coll.windowBot);
+        if (coll.side.line.twosided) {
             var otherSide = coll.side.line.front === coll.side ? coll.side.line.back : coll.side.line.front,
                 otherSector = otherSide.sector;
-//            drawColumn(state, otherSector, coll.column, coll.angle, coll.colTop+1, coll.colBot-1);
+            if (otherSector.ceiling < coll.sector.ceiling) {
+		var middleTop = Math.max(horizon - (heightFactor*(player.eyeLevel+player.height+otherSector.ceiling)), coll.windowTop)
+		ctx.beginPath();
+		ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
+		ctx.moveTo(coll.column+0.5, colTop);
+		ctx.lineTo(coll.column+0.5, middleTop);
+		ctx.stroke();
+	    }
+	    if( otherSector.floor > coll.sector.floor) {
+		var middleBot = Math.min(horizon + (heightFactor*(player.eyeLevel+player.height-otherSector.floor)), coll.windowBot)
+		ctx.beginPath();
+		ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
+		ctx.moveTo(coll.column+0.5, middleBot);
+		ctx.lineTo(coll.column+0.5, colBot);
+		ctx.stroke();
+	    }
+            drawColumn(state, otherSector, coll.column, coll.angle, colTop+1, colBot-1);
         } else {
             ctx.beginPath();
-            ctx.strokeStyle = 'rgb(' + coll.shade + ',' + coll.shade + ',' + coll.shade + ')';
-            ctx.moveTo(column+0.5, coll.colTop);
-            ctx.lineTo(column+0.5, coll.colBot);
+	    ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
+            ctx.moveTo(coll.column+0.5, colTop);
+            ctx.lineTo(coll.column+0.5, colBot);
             ctx.stroke();
         }
+        ctx.beginPath();
+	ctx.strokeStyle = 'rgb(20,200,100)';
+        ctx.moveTo(coll.column+0.5, windowTop);
+        ctx.lineTo(coll.column+0.5, colTop);
+        ctx.moveTo(coll.column+0.5, colBot);
+        ctx.lineTo(coll.column+0.5, windowBot);
+        ctx.stroke();
     });
 }
 
@@ -865,8 +889,8 @@ function keyUpHandler(state, e) {
 
 function start() {
     var doomMap = true;
-    var width = 800;
-    var height = 600;
+    var width = 400;
+    var height = 400;
     var threeDwidth = 320;
     var threeDheight = 200;
     var i;
