@@ -323,7 +323,8 @@ function drawMap(state) {
 
 function drawThreeD(state) {
     var ctx = state.view.threeDctx;
-
+    var player = state.player;
+    
     ctx.clearRect(0, 0, state.view.threeDwidth, state.view.threeDheight);
 
     ctx.save();
@@ -338,9 +339,23 @@ function drawThreeD(state) {
     var fov2 = state.player.fov/2;
     var deltaAngle = state.player.fov/state.view.threeDwidth;
 
+    ctx.fillStyle = 'rgb(202,225,255)';
+    // ctx.fillStyle = 'rgb(0,40,200)';
+    ctx.fillRect(1, 1, state.view.threeDwidth-2, state.view.threeDheight/2);
+    // ctx.fillStyle = 'rgb(0,200,40)';
+    // ctx.fillRect(1, state.view.threeDheight/2+1, state.view.threeDwidth-2, state.view.threeDheight/2-2);
     for (var column = 1, angle = -fov2; column < state.view.threeDwidth-1; column++, angle += deltaAngle) {
-        drawColumn(state, state.player.sector, column, angle, 0, state.view.threeDheight-1, 0);
+        var dx = Math.cos(player.angle + angle),
+            dy = Math.sin(player.angle + angle),
+            rayStart = player.pos,
+            rayEnd = {x: player.pos.x + dx * player.viewRange, y: player.pos.y + dy * player.viewRange};
+        drawColumn(state, state.player.sector, state.player.pos, rayStart, rayEnd,
+                   column, angle, 0, state.view.threeDheight-1, 0);
     }
+    // while (state.view.queue.length > 0) {
+    //     var job = state.view.queue.shift();
+    //     drawColumn(state, job.sector, job.column, job..angle, job.colTop, job.colBot);
+    // }
     ctx.restore();
 
     if (!state.view.showMap) {
@@ -353,12 +368,29 @@ function drawThreeD(state) {
     }
 }
 
-function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
+function textureToColor(tex) {
+            return 'rgb(200,200,200)';
+    switch (tex) {
+    case "NUKAGE3":
+        return 'rgb(0,225,0)';
+    default:
+        if (tex.startsWith("FLOOR")) {
+            return 'rgb(100,100,100)';
+        } else if (tex.startsWith("CEIL")) {
+            return 'rgb(200,200,200)';
+        } else {
+            return 'rgb(150,200,100)';
+        }
+    }
+}
+
+function drawColumn(state, sector, startPos, rayStart, rayEnd, column, angle, windowTop, windowBot, depth) {
     if (sector.visited == true) {
 	return;
     }
-    if (depth > 100) {
-	return;
+    if (depth > state.view.renderDepth) {
+//        console.log("depth too large:", depth);
+        return;
     }
     if (windowTop > windowBot) {
         return;
@@ -368,10 +400,6 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
         ctx = state.view.threeDctx;
 
     var horizon = state.view.threeDheight / 2;
-    var dx = Math.cos(player.angle + angle),
-        dy = Math.sin(player.angle + angle),
-        p0 = player.pos,
-        p1 = {x: player.pos.x + dx * player.viewRange, y: player.pos.y + dy * player.viewRange};
     var collisions = [];
     function insert(coll) {
         var i = 0;
@@ -384,13 +412,16 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
         }
         collisions.push(coll);
     }
+    var dx = Math.cos(player.angle + angle),
+        dy = Math.sin(player.angle + angle);
     sector.sides.forEach(function(side) {
         var dp = dotProd(dx, dy, side.normal.x, side.normal.y);
         if (dp < 0) {
-            var intersection = segmentIntersect(p0, p1, side.p1, side.p2);
+            var intersection = segmentIntersect(rayStart, rayEnd, side.p1, side.p2);
             if (intersection != null) {
-                var dist = pDist(intersection, player.pos) * Math.cos(angle);
+                var dist = pDist(intersection, startPos) * Math.cos(angle);
                 insert({dist: dist,
+                        intersection: intersection,
                         side: side,
                         column: column,
                         angle: angle,
@@ -401,54 +432,97 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
         }
     });
     collisions.forEach(function(coll) {
+        // Determine color based on distance.
         var shade = 245 - ((coll.dist * 245 / player.viewRange) | 0);
+
+        // Determine the relative size of this wall fragment.
 	var heightFactor = 0.12*player.viewRange / coll.dist;
+        // Eye height of player.
 	var eyeHeight = player.eyeLevel+player.height;
+
+        // Top and bottom of the wall slice for the current column.
 	var sectorTop = horizon + (heightFactor*(eyeHeight-coll.sector.ceiling)),
 	    sectorBot = horizon + (heightFactor*(eyeHeight-coll.sector.floor));
+
 	if (sectorTop >= coll.windowBot || sectorBot <= coll.windowTop) {
 	    return;
 	}
+
+        // Now we clip the wall slice to the window we are looking through.
         var colTop = Math.max(sectorTop, coll.windowTop),
             colBot = Math.min(sectorBot, coll.windowBot);
 	if (colTop > colBot) {
 	    return;
 	}
+        // Draw ceiling.
+        if (coll.sector.ceilingTexture != "F_SKY1") {
         ctx.beginPath();
-	ctx.strokeStyle = 'rgb(20,200,100)';
+	ctx.strokeStyle = textureToColor(coll.sector.ceilingTexture);
         ctx.moveTo(coll.column+0.5, windowTop+0.5);
         ctx.lineTo(coll.column+0.5, colTop+0.5);
         ctx.stroke();
+        }
+        // Draw floor.
         ctx.beginPath();
-	ctx.strokeStyle = 'rgb(200,20,100)';
+	ctx.strokeStyle = textureToColor(coll.sector.floorTexture);
         ctx.moveTo(coll.column+0.5, colBot+0.5);
         ctx.lineTo(coll.column+0.5, windowBot+0.5);
         ctx.stroke();
+
         if (coll.side.line.twosided) {
             var otherSide = coll.side.line.front === coll.side ? coll.side.line.back : coll.side.line.front,
                 otherSector = otherSide.sector;
-	    var middleTop = Math.max(horizon + (heightFactor*(eyeHeight - otherSector.ceiling)), coll.windowTop)
-            if (otherSector.ceiling < coll.sector.ceiling) {
+
+            // Determine top and bottom of the next sector.
+            var otherSectorTop = horizon + (heightFactor * (eyeHeight - otherSector.ceiling)),
+	        otherSectorBot = horizon + (heightFactor * (eyeHeight - otherSector.floor));
+
+	    var middleTop = Math.max(otherSectorTop, colTop),
+	        middleBot = Math.min(otherSectorBot, colBot);
+
+            if (otherSector.ceiling < coll.sector.ceiling && coll.side.upper != "-") {
 		ctx.beginPath();
 		ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
 		ctx.moveTo(coll.column+0.5, colTop+0.5);
 		ctx.lineTo(coll.column+0.5, middleTop+0.5);
 		ctx.stroke();
+                ctx.beginPath();
+	        ctx.strokeStyle = 'black';
+                ctx.moveTo(coll.column+0.5, middleTop+0.5);
+                ctx.lineTo(coll.column+0.5, middleTop+1.5);
+                ctx.stroke();
 		colTop = middleTop;
 	    }
-	    var middleBot = Math.min(horizon + (heightFactor*(eyeHeight - otherSector.floor)), coll.windowBot)
-	    if( otherSector.floor > coll.sector.floor) {
+
+            if (coll.side.middle != "-") {
+		ctx.beginPath();
+		ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
+		ctx.moveTo(coll.column+0.5, middleTop+0.5);
+		ctx.lineTo(coll.column+0.5, middleBot+0.5);
+		ctx.stroke();
+            }
+	    if( otherSector.floor > coll.sector.floor && coll.side.lower != "-") {
 		ctx.beginPath();
 		ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
 		ctx.moveTo(coll.column+0.5, middleBot+0.5);
 		ctx.lineTo(coll.column+0.5, colBot+0.5);
 		ctx.stroke();
+                ctx.beginPath();
+	        ctx.strokeStyle = 'black';
+                ctx.moveTo(coll.column+0.5, middleBot+0.5);
+                ctx.lineTo(coll.column+0.5, middleBot+1.5);
+                ctx.stroke();
 		colBot = middleBot;
 	    }
-//	    console.log(otherSector.id, coll.column, coll.angle, colTop+1, colBot-1);
-	    sector.visited = true;
-            drawColumn(state, otherSector, coll.column, coll.angle, colTop, colBot, depth+1);
-    sector.visited = false;
+	    if (otherSectorTop >= coll.windowBot || otherSectorBot <= coll.windowTop) {
+	    } else {
+
+            if (coll.side.middle == "-") {
+	        sector.visited = true;
+                drawColumn(state, otherSector, startPos, coll.intersection, rayEnd, coll.column, coll.angle, middleTop, middleBot, depth + 1);
+                sector.visited = false;
+            }
+            }
         } else {
             ctx.beginPath();
 	    ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
@@ -456,6 +530,13 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
             ctx.lineTo(coll.column+0.5, colBot+0.5);
             ctx.stroke();
         }
+        ctx.beginPath();
+	ctx.strokeStyle = 'black';
+        ctx.moveTo(coll.column+0.5, colTop+0.5);
+        ctx.lineTo(coll.column+0.5, colTop+1.5);
+        ctx.moveTo(coll.column+0.5, colBot+0.5);
+        ctx.lineTo(coll.column+0.5, colBot+1.5);
+        ctx.stroke();
     });
 }
 
@@ -748,8 +829,8 @@ function collisionResolve(state, mob, dx, dy) {
 
                     var otherFloor = otherSide.sector.floor,
                         otherCeiling = otherSide.sector.ceiling;
-                    if (otherFloor - mob.height <= mob.stepHeight &&
-                        otherCeiling > mob.height + mob.size) {
+                    if (otherFloor - mob.height <= mob.stepHeight){// &&
+//                        otherCeiling > mob.height + mob.size) {
 			// Actor fits through opening to next sector.
                         skip = true;
                     }
@@ -904,6 +985,16 @@ function keyUpHandler(state, e) {
 	    startLoop(state);
         }
 	break;
+    case 70: // F
+        if (state.view.renderDepth > 1) {
+            state.view.renderDepth -= 1;
+        }
+        break;
+    case 71: // G
+        if (state.view.renderDepth < 20) {
+            state.view.renderDepth += 1;
+        }
+        break;
     case 88: // X
         state.view.debug = !state.view.debug;
 	break;
@@ -915,8 +1006,8 @@ function keyUpHandler(state, e) {
 
 function start() {
     var doomMap = true;
-    var width = 400;
-    var height = 400;
+    var width = 640;
+    var height = 480;
     var threeDwidth = 320;
     var threeDheight = 200;
     var i;
@@ -975,6 +1066,8 @@ function start() {
             var sector = {id: i,
                           floor: sectordef.floorHeight,
                           ceiling: sectordef.ceilingHeight,
+                          floorTexture: sectordef.floorFlat,
+                          ceilingTexture: sectordef.ceilingFlat,
 			  sides: [],
 			  bbox: {l: giantNumber,
 				 r: -giantNumber,
@@ -986,7 +1079,10 @@ function start() {
             var sidedef = level_E1M1.sidedefs[i];
 	    var sec = sectors[sidedef.sector];
             var side = {id: i,
-                        sector: sec};
+                        sector: sec,
+                        lower: sidedef.lowerTexture,
+                        upper: sidedef.upperTexture,
+                        middle: sidedef.middleTexture};
 	    sec.sides.push(side);
             sides.push(side);
         }
@@ -1131,7 +1227,9 @@ function start() {
 	    showLines: true,
 	    showSectors: false,
             showThreeD: true,
-            showMap: true
+            showMap: true,
+            renderDepth: 3,
+            queue: []
         },
         input: {
             moveBackward: false,
