@@ -404,8 +404,13 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
         var shade = 245 - ((coll.dist * 245 / player.viewRange) | 0);
 	var heightFactor = 0.12*player.viewRange / coll.dist;
 	var eyeHeight = player.eyeLevel+player.height;
-        var colTop = Math.max(horizon + (heightFactor*(eyeHeight-coll.sector.ceiling)), coll.windowTop),
-            colBot = Math.min(horizon + (heightFactor*(eyeHeight-coll.sector.floor)), coll.windowBot);
+	var sectorTop = horizon + (heightFactor*(eyeHeight-coll.sector.ceiling)),
+	    sectorBot = horizon + (heightFactor*(eyeHeight-coll.sector.floor));
+	if (sectorTop >= coll.windowBot || sectorBot <= coll.windowTop) {
+	    return;
+	}
+        var colTop = Math.max(sectorTop, coll.windowTop),
+            colBot = Math.min(sectorBot, coll.windowBot);
 	if (colTop > colBot) {
 	    return;
 	}
