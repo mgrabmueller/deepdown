@@ -331,6 +331,10 @@ function drawThreeD(state) {
     ctx.strokeStyle = 'black';
     ctx.strokeRect(0, 0, state.view.threeDwidth, state.view.threeDheight);
 
+    state.sectors.forEach(function(sector) {
+	sector.visited = false;
+    });
+    
     var fov2 = state.player.fov/2;
     var deltaAngle = state.player.fov/state.view.threeDwidth;
 
@@ -350,7 +354,10 @@ function drawThreeD(state) {
 }
 
 function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
-    if (depth > 10) {
+    if (sector.visited == true) {
+	return;
+    }
+    if (depth > 100) {
 	return;
     }
     if (windowTop > windowBot) {
@@ -399,18 +406,24 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
 	var eyeHeight = player.eyeLevel+player.height;
         var colTop = Math.max(horizon + (heightFactor*(eyeHeight-coll.sector.ceiling)), coll.windowTop),
             colBot = Math.min(horizon + (heightFactor*(eyeHeight-coll.sector.floor)), coll.windowBot);
+	if (colTop > colBot) {
+	    return;
+	}
         ctx.beginPath();
 	ctx.strokeStyle = 'rgb(20,200,100)';
         ctx.moveTo(coll.column+0.5, windowTop+0.5);
         ctx.lineTo(coll.column+0.5, colTop+0.5);
+        ctx.stroke();
+        ctx.beginPath();
+	ctx.strokeStyle = 'rgb(200,20,100)';
         ctx.moveTo(coll.column+0.5, colBot+0.5);
         ctx.lineTo(coll.column+0.5, windowBot+0.5);
         ctx.stroke();
         if (coll.side.line.twosided) {
             var otherSide = coll.side.line.front === coll.side ? coll.side.line.back : coll.side.line.front,
                 otherSector = otherSide.sector;
+	    var middleTop = Math.max(horizon + (heightFactor*(eyeHeight - otherSector.ceiling)), coll.windowTop)
             if (otherSector.ceiling < coll.sector.ceiling) {
-		var middleTop = Math.max(horizon + (heightFactor*(eyeHeight - otherSector.ceiling)), coll.windowTop)
 		ctx.beginPath();
 		ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
 		ctx.moveTo(coll.column+0.5, colTop+0.5);
@@ -418,8 +431,8 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
 		ctx.stroke();
 		colTop = middleTop;
 	    }
+	    var middleBot = Math.min(horizon + (heightFactor*(eyeHeight - otherSector.floor)), coll.windowBot)
 	    if( otherSector.floor > coll.sector.floor) {
-		var middleBot = Math.min(horizon + (heightFactor*(eyeHeight - otherSector.floor)), coll.windowBot)
 		ctx.beginPath();
 		ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
 		ctx.moveTo(coll.column+0.5, middleBot+0.5);
@@ -428,7 +441,9 @@ function drawColumn(state, sector, column, angle, windowTop, windowBot, depth) {
 		colBot = middleBot;
 	    }
 //	    console.log(otherSector.id, coll.column, coll.angle, colTop+1, colBot-1);
+	    sector.visited = true;
             drawColumn(state, otherSector, coll.column, coll.angle, colTop, colBot, depth+1);
+    sector.visited = false;
         } else {
             ctx.beginPath();
 	    ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
