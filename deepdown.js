@@ -304,9 +304,10 @@ function drawMap(state) {
 	}
     }
     // Draw the monsters.
-    state.monsters.forEach(function(monster) {
+    for (var i = 0; i < state.monsters.length; i++) {
+	var monster = state.monsters[i];
 	drawActor(state, monster, 'rgb(240,0,100)');
-    });
+    }
 
     // Draw the player.
     drawActor(state, player, 'rgb(128,200,0)');
@@ -326,6 +327,8 @@ function drawThreeD(state) {
     var ctx = state.view.threeDctx;
     var player = state.player;
 
+    state.view.fuel = 3000;
+    
     ctx.clearRect(0, 0, state.view.threeDwidth, state.view.threeDheight);
 
     ctx.save();
@@ -333,8 +336,8 @@ function drawThreeD(state) {
     ctx.strokeStyle = 'black';
     ctx.strokeRect(0, 0, state.view.threeDwidth, state.view.threeDheight);
 
-    var fov2 = state.player.fov/2;
-    var deltaAngle = state.player.fov/state.view.threeDwidth;
+    var fov2 = state.player.fov / 2;
+    var deltaAngle = state.player.fov / state.view.threeDwidth;
 
     // For each column, schedule the rendering of the scene for this column.
     for (var column = 1, angle = -fov2; column < state.view.threeDwidth-1; column++, angle += deltaAngle) {
@@ -343,7 +346,10 @@ function drawThreeD(state) {
             rayStart = player.pos,
             rayEnd = {x: player.pos.x + dx * player.viewRange, y: player.pos.y + dy * player.viewRange};
         scheduleColumn(state, state.player.sector, state.player.pos, rayStart, rayEnd,
-			      column, angle, 0, state.view.threeDheight-1);
+		       column, angle, 0, state.view.threeDheight-1);
+	if (state.fuel <= 0) {
+	    break;
+	}
     }
 
     processThreeDQueue(state);
@@ -364,7 +370,8 @@ function processThreeDQueue(state) {
 
     var lastLine = -1;
 
-    while (state.view.queueIn !== state.view.queueOut) {
+    while (state.view.queueIn !== state.view.queueOut && state.view.fuel >= 0) {
+	state.view.fuel -= 1;
         var coll = state.view.queue[state.view.queueOut];
         state.view.queueOut = (state.view.queueOut + 1) % state.view.queue.length;
 
@@ -380,7 +387,8 @@ function processThreeDQueue(state) {
 	    sectorBot = horizon + (heightFactor*(eyeHeight-coll.sector.floor));
 
 	if (sectorTop >= coll.windowBot || sectorBot <= coll.windowTop) {
-	    continue;
+	    //console.log("sectorTop", sectorTop, "coll.windowBot", coll.windowBot, "sectorBot", sectorBot, "coll.windowTop", coll.windowTop);
+	    //continue;
 	}
 
         // Now we clip the wall slice to the window we are looking through.
@@ -393,7 +401,7 @@ function processThreeDQueue(state) {
         // Draw ceiling.
         ctx.beginPath();
 	ctx.strokeStyle = shadeGray(200, coll.sector.lightLevel);
-        ctx.moveTo(coll.column+0.5, coll.windowTop+0.5);
+        ctx.moveTo(coll.column+0.5, coll.windowTop-0.5);
         ctx.lineTo(coll.column+0.5, colTop+0.5);
         ctx.stroke();
         // Draw floor.
@@ -414,7 +422,7 @@ function processThreeDQueue(state) {
 	    var middleTop = Math.max(otherSectorTop, colTop),
 	        middleBot = Math.min(otherSectorBot, colBot);
 
-            if (otherSector.ceiling < coll.sector.ceiling && coll.side.upper != "-") {
+            if (colTop < middleTop && otherSector.ceiling < coll.sector.ceiling && coll.side.upper != "-") {
 		ctx.beginPath();
 		ctx.strokeStyle = shade;
 		ctx.moveTo(coll.column+0.5, colTop-0.5);
@@ -429,7 +437,7 @@ function processThreeDQueue(state) {
 		}
 	    }
 
-            if (coll.side.middle != "-") {
+            if (middleTop < middleBot && coll.side.middle != "-") {
 		ctx.beginPath();
 		ctx.strokeStyle = shade
 		ctx.moveTo(coll.column+0.5, middleTop-0.5);
@@ -454,9 +462,9 @@ function processThreeDQueue(state) {
 	    if (otherSectorTop >= coll.windowBot || otherSectorBot <= coll.windowTop) {
 	    } else {
 
-            if (coll.side.middle == "-") {
-                scheduleColumn(state, otherSector, coll.startPos, coll.intersection, coll.rayEnd, coll.column, coll.angle, middleTop, middleBot);
-            }
+		if (coll.side.middle == "-") {
+                    scheduleColumn(state, otherSector, coll.startPos, coll.intersection, coll.rayEnd, coll.column, coll.angle, middleTop, middleBot);
+		}
             }
         } else {
             ctx.beginPath();
@@ -520,7 +528,9 @@ function scheduleColumn(state, sector, startPos, rayStart, rayEnd, column, angle
 
     var dx = Math.cos(player.angle + angle),
         dy = Math.sin(player.angle + angle);
-    sector.sides.forEach(function(side) {
+    var i;
+    for (i = 0; i < sector.sides.length; i++) {
+	var side = sector.sides[i];
         var dp = dotProd(dx, dy, side.normal.x, side.normal.y);
         if (dp < 0) {
             var intersection = segmentIntersect(rayStart, rayEnd, side.p1, side.p2);
@@ -541,7 +551,7 @@ function scheduleColumn(state, sector, startPos, rayStart, rayEnd, column, angle
                 }
             }
         }
-    });
+    }
 
     if (collision !== null) {
         if ((state.view.queueIn + 1) % state.view.queue.length !== state.view.queueOut) {
@@ -561,20 +571,11 @@ function updateActorBbox(actor) {
 }
 
 function updateBboxes(state) {
-    state.monsters.forEach(function(monster) {
+    for (var i = 0; i < state.monsters.length; i++) {
+	var monster = state.monsters[i];
 	updateActorBbox(monster);
-    });
+    }
     updateActorBbox(state.player);
-}
-
-function updateGeometry(state) {
-    state.lines.forEach(function(line) {
-        if (line.twosided) {
-            line.blocking = false;
-        } else {
-            line.blocking = true;
-        }
-    });
 }
 
 function updatePlayer(state) {
@@ -644,7 +645,9 @@ function updatePlayer(state) {
 
 function updateMonsters(state) {
     var i;
-    state.monsters.forEach(function(monster) {
+    for (i = 0; i < state.monsters.length; i++) {
+	var monster = state.monsters[i];
+
 	monster.tick += 1;
 
 	switch (monster.state) {
@@ -675,7 +678,7 @@ function updateMonsters(state) {
         if (monster.sector != null && monster.height < monster.sector.floor) {
             monster.height = monster.sector.floor;
         }
-    });
+    }
 }
 
 function processViewInput(state) {
@@ -720,7 +723,6 @@ function updateState(state) {
 	state.stats.lastTPSTimestamp = now;
     }
 
-    updateGeometry(state);
     updatePlayer(state);
     updateMonsters(state);
     updateBboxes(state);
@@ -822,7 +824,8 @@ function collisionResolve(state, mob, dx, dy) {
         iterations += 1;        // Make sure we terminate, even for
                                 // crazy maps.
 
-	state.lines.forEach(function(line) {
+	for (var i = 0; i < state.lines.length; i++) {
+	    var line = state.lines[i];
 
 	    var skip = false;
             if (bboxIntersect(line.bbox, {l: mob.bbox.l + dx,
@@ -868,7 +871,7 @@ function collisionResolve(state, mob, dx, dy) {
                     }
 		}
             }
-        });
+        }
     }
     if (collideMob(state, mob, dx, dy)) {
 	return true;
@@ -878,7 +881,8 @@ function collisionResolve(state, mob, dx, dy) {
 	var newX = mob.pos.x + dx,
 	    newY = mob.pos.y + dy;
 	var newPlayerPos = {x: newX, y: newY};
-	state.lines.forEach(function(line) {
+	for (var i = 0; i < state.lines.length; i++) {
+	    var line = state.lines[i];
 
             var projected = projectPointToLine(newPlayerPos, line);
 
@@ -895,7 +899,7 @@ function collisionResolve(state, mob, dx, dy) {
                     mob.sector = thisSide.sector;
 	        }
             }
-        });
+        }
         mob.pos.x += dx;
         mob.pos.y += dy;
     }
@@ -978,6 +982,9 @@ function keyUpHandler(state, e) {
 	break;
     case 77: // M
         state.input.zoomOut = false;
+	if (state.view.debug) {
+	    state.view.showThreeD = !state.view.showThreeD;
+	}
 	break;
     case 74: // J
         state.input.panUp = false;
@@ -998,16 +1005,6 @@ function keyUpHandler(state, e) {
 	    startLoop(state);
         }
 	break;
-    case 70: // F
-        if (state.view.renderDepth > 1) {
-            state.view.renderDepth -= 1;
-        }
-        break;
-    case 71: // G
-        if (state.view.renderDepth < 20) {
-            state.view.renderDepth += 1;
-        }
-        break;
     case 88: // X
         state.view.debug = !state.view.debug;
 	break;
@@ -1018,6 +1015,8 @@ function keyUpHandler(state, e) {
 }
 
 function start() {
+    console.log("init...");
+
     var doomMap = true;
     var width = 400;
     var height = 300;
@@ -1089,6 +1088,7 @@ function start() {
 				 b: -giantNumber}};
             sectors.push(sector);
         }
+	console.log(sectors.length + " sectors");
         for (i = 0; i < level_E1M1.sidedefs.length; i++) {
             var sidedef = level_E1M1.sidedefs[i];
 	    var sec = sectors[sidedef.sector];
@@ -1101,6 +1101,7 @@ function start() {
 	    sec.sides.push(side);
             sides.push(side);
         }
+	console.log(sides.length + " sides");
 
         var vertices = level_E1M1.vertices;
         var minx = giantNumber,
@@ -1108,6 +1109,7 @@ function start() {
 	    miny = giantNumber,
 	    maxy = -giantNumber;
 
+	console.log(vertices.length + " vertices");
         for (i = 0; i < vertices.length; i++) {
             var p = vertices[i];
 	    minx = Math.min(minx, p.x);
@@ -1142,6 +1144,7 @@ function start() {
 	    }
             lines.push(line);
         }
+	console.log(lines.length + " lines");
 
 	/* Calculate bounding boxes for all sectors.  */
 	sectors.forEach(function(sec) {
@@ -1176,6 +1179,9 @@ function start() {
                               });
 	    }
         }
+	console.log(monsters.length + " monsters");
+
+	level_E1M1 = null;
     }
 
     /* Calculate some useful values per line. */
@@ -1246,13 +1252,12 @@ function start() {
 	    showLines: true,
 	    showSectors: false,
             renderLines: false,
-            showThreeD: true,
+            showThreeD: false,
             showMap: true,
-            renderDepth: 3,
             queueIn: 0,
             queueOut: 0,
             queue: queue,
-            maxQueueLen: 0
+	    fuel: 0
         },
         input: {
             moveBackward: false,
@@ -1308,5 +1313,6 @@ function start() {
     document.addEventListener('keyup', function(e) { keyUpHandler(state, e); });
     document.addEventListener('keydown', function(e) { keyDownHandler(state, e);});
 
+    console.log("init done");
     startLoop(state);
 }
