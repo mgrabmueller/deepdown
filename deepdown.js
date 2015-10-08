@@ -73,7 +73,8 @@ function pDist(p1, p2) {
 }
 
 /* Find the sector that contains point (x,y).  Return null if not
- * inside any sector. */
+ * inside any sector. Note that this is not fool-proof and may return
+ * a wrong sector for certain maps.  */
 function findSector(state, x, y) {
     var foundSector = null,
 	smallestArea = 1000000000000;
@@ -324,7 +325,7 @@ function drawMap(state) {
 function drawThreeD(state) {
     var ctx = state.view.threeDctx;
     var player = state.player;
-    
+
     ctx.clearRect(0, 0, state.view.threeDwidth, state.view.threeDheight);
 
     ctx.save();
@@ -332,44 +333,44 @@ function drawThreeD(state) {
     ctx.strokeStyle = 'black';
     ctx.strokeRect(0, 0, state.view.threeDwidth, state.view.threeDheight);
 
-    state.sectors.forEach(function(sector) {
-	sector.visited = [];
-	for (var j = 0; j < state.view.threeDwidth; j++) {
-	    sector.visited.push(false);
-	}
-    });
-    
     var fov2 = state.player.fov/2;
     var deltaAngle = state.player.fov/state.view.threeDwidth;
 
-    ctx.fillStyle = 'rgb(202,225,255)';
-    // ctx.fillStyle = 'rgb(0,40,200)';
-    ctx.fillRect(1, 1, state.view.threeDwidth-2, state.view.threeDheight/2);
-    // ctx.fillStyle = 'rgb(0,200,40)';
-    // ctx.fillRect(1, state.view.threeDheight/2+1, state.view.threeDwidth-2, state.view.threeDheight/2-2);
+    // For each column, schedule the rendering of the scene for this column.
     for (var column = 1, angle = -fov2; column < state.view.threeDwidth-1; column++, angle += deltaAngle) {
         var dx = Math.cos(player.angle + angle),
             dy = Math.sin(player.angle + angle),
             rayStart = player.pos,
             rayEnd = {x: player.pos.x + dx * player.viewRange, y: player.pos.y + dy * player.viewRange};
-        drawColumn(state, state.player.sector, state.player.pos, rayStart, rayEnd,
-			      column, angle, 0, state.view.threeDheight-1, 0);
+        scheduleColumn(state, state.player.sector, state.player.pos, rayStart, rayEnd,
+			      column, angle, 0, state.view.threeDheight-1);
     }
+
+    processThreeDQueue(state);
+}
+
+function shadeGray(shade, lightLevel) {
+    var g = (shade * (lightLevel / 255)) | 0;
+    return 'rgb(' + g + ',' + g + ',' + g + ')';
+}
+
+function processThreeDQueue(state) {
+    var player = state.player,
+        ctx = state.view.threeDctx;
 
     var horizon = state.view.threeDheight / 2;
     // Eye height of player.
     var eyeHeight = player.eyeLevel+player.height;
 
-    var maxLen = 0;
     var lastLine = -1;
-    while (state.view.queue.length > 0) {
-	maxLen = Math.max(maxLen, state.view.queue.length);
 
-        var coll = state.view.queue.shift();
+    while (state.view.queueIn !== state.view.queueOut) {
+        var coll = state.view.queue[state.view.queueOut];
+        state.view.queueOut = (state.view.queueOut + 1) % state.view.queue.length;
 
-//	console.log(coll.column, coll.sector.id);
         // Determine color based on distance.
-        var shade = 245 - ((coll.dist * 245 / player.viewRange) | 0);
+        var distShade = 250 - ((coll.dist * 250 / player.viewRange) | 0);
+        var shade = shadeGray(distShade, coll.sector.lightLevel);
 
         // Determine the relative size of this wall fragment.
 	var heightFactor = 0.12*player.viewRange / coll.dist;
@@ -379,27 +380,26 @@ function drawThreeD(state) {
 	    sectorBot = horizon + (heightFactor*(eyeHeight-coll.sector.floor));
 
 	if (sectorTop >= coll.windowBot || sectorBot <= coll.windowTop) {
-	    return;
+	    continue;
 	}
 
         // Now we clip the wall slice to the window we are looking through.
         var colTop = Math.max(sectorTop, coll.windowTop),
             colBot = Math.min(sectorBot, coll.windowBot);
 	if (colTop > colBot) {
-	    return;
+	    continue;
 	}
+
         // Draw ceiling.
-        if (coll.sector.ceilingTexture != "F_SKY1") {
         ctx.beginPath();
-	ctx.strokeStyle = textureToColor(coll.sector.ceilingTexture);
+	ctx.strokeStyle = shadeGray(200, coll.sector.lightLevel);
         ctx.moveTo(coll.column+0.5, coll.windowTop+0.5);
         ctx.lineTo(coll.column+0.5, colTop+0.5);
         ctx.stroke();
-        }
         // Draw floor.
         ctx.beginPath();
-	ctx.strokeStyle = textureToColor(coll.sector.floorTexture);
-        ctx.moveTo(coll.column+0.5, colBot+0.5);
+	ctx.strokeStyle = shadeGray(180, coll.sector.lightLevel);
+        ctx.moveTo(coll.column+0.5, colBot);
         ctx.lineTo(coll.column+0.5, coll.windowBot+0.5);
         ctx.stroke();
 
@@ -415,79 +415,85 @@ function drawThreeD(state) {
 	        middleBot = Math.min(otherSectorBot, colBot);
 
             if (otherSector.ceiling < coll.sector.ceiling && coll.side.upper != "-") {
-		// ctx.beginPath();
-		// ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
-		// ctx.moveTo(coll.column+0.5, colTop+0.5);
-		// ctx.lineTo(coll.column+0.5, middleTop+0.5);
-		// ctx.stroke();
-		if (middleTop < colBot) {
+		ctx.beginPath();
+		ctx.strokeStyle = shade;
+		ctx.moveTo(coll.column+0.5, colTop-0.5);
+		ctx.lineTo(coll.column+0.5, Math.min(colBot+0.5, middleTop+0.5));
+		ctx.stroke();
+		if (middleTop < colBot && state.view.renderLines) {
                     ctx.beginPath();
 	            ctx.strokeStyle = 'black';
                     ctx.moveTo(coll.column+0.5, middleTop+0.5);
                     ctx.lineTo(coll.column+0.5, middleTop+1.5);
                     ctx.stroke();
 		}
-//		colTop = middleTop;
 	    }
 
             if (coll.side.middle != "-") {
 		ctx.beginPath();
-		ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
-		ctx.moveTo(coll.column+0.5, middleTop+0.5);
+		ctx.strokeStyle = shade
+		ctx.moveTo(coll.column+0.5, middleTop-0.5);
 		ctx.lineTo(coll.column+0.5, middleBot+0.5);
 		ctx.stroke();
             }
 	    if( otherSector.floor > coll.sector.floor && coll.side.lower != "-") {
-		// ctx.beginPath();
-		// ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
-		// ctx.moveTo(coll.column+0.5, middleBot+0.5);
-		// ctx.lineTo(coll.column+0.5, colBot+0.5);
-		// ctx.stroke();
-                ctx.beginPath();
-	        ctx.strokeStyle = 'black';
-                ctx.moveTo(coll.column+0.5, middleBot+0.5);
-                ctx.lineTo(coll.column+0.5, middleBot+1.5);
-                ctx.stroke();
+		ctx.beginPath();
+		ctx.strokeStyle = shade;
+		ctx.moveTo(coll.column+0.5, middleBot);
+		ctx.lineTo(coll.column+0.5, colBot+0.5);
+		ctx.stroke();
+		if (middleBot > colTop && state.view.renderLines) {
+                    ctx.beginPath();
+	            ctx.strokeStyle = 'black';
+                    ctx.moveTo(coll.column+0.5, middleBot+0.5);
+                    ctx.lineTo(coll.column+0.5, middleBot+1.5);
+                    ctx.stroke();
+                }
 
-//		colBot = middleBot;
 	    }
 	    if (otherSectorTop >= coll.windowBot || otherSectorBot <= coll.windowTop) {
 	    } else {
 
             if (coll.side.middle == "-") {
-                drawColumn(state, otherSector, coll.startPos, coll.intersection, coll.rayEnd, coll.column, coll.angle, middleTop, middleBot, coll.depth + 1);
+                scheduleColumn(state, otherSector, coll.startPos, coll.intersection, coll.rayEnd, coll.column, coll.angle, middleTop, middleBot);
             }
             }
         } else {
             ctx.beginPath();
-	    ctx.strokeStyle = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
-            ctx.moveTo(coll.column+0.5, colTop+0.5);
+	    ctx.strokeStyle = shade;
+            ctx.moveTo(coll.column+0.5, colTop-0.5);
             ctx.lineTo(coll.column+0.5, colBot+0.5);
             ctx.stroke();
 	}
-	if (state.view.queue.length > 0 && lastLine != -1 && lastLine != state.view.queue[0].side.id && !state.view.queue[0].side.twosided &&
-	    state.view.queue[0].dist > coll.dist) {
-	    lastLine = state.view.queue[0].side.id;
-            ctx.beginPath();
-	    ctx.strokeStyle = 'black';
-            ctx.moveTo(coll.column+0.5, colTop+0.5);
-            ctx.lineTo(coll.column+0.5, colBot+1.5);
-            ctx.stroke();
-	} else if (lastLine != coll.side.id && !coll.side.twosided) {
-	    lastLine = coll.side.id;
-            ctx.beginPath();
-	    ctx.strokeStyle = 'black';
-            ctx.moveTo(coll.column+0.5, colTop+0.5);
-            ctx.lineTo(coll.column+0.5, colBot+1.5);
-            ctx.stroke();
-	} else {
-            ctx.beginPath();
-	    ctx.strokeStyle = 'black';
-            ctx.moveTo(coll.column+0.5, colTop+0.5);
-            ctx.lineTo(coll.column+0.5, colTop+1.5);
-            ctx.moveTo(coll.column+0.5, colBot+0.5);
-            ctx.lineTo(coll.column+0.5, colBot+1.5);
-            ctx.stroke();
+        if (state.view.renderLines) {
+	    if (state.view.queueIn != state.view.queueOut &&
+                lastLine != -1 &&
+                lastLine != state.view.queue[state.view.queueOut].side.id &&
+                !state.view.queue[state.view.queueOut].side.twosided &&
+	        state.view.queue[state.view.queueOut].dist > coll.dist)
+            {
+	        lastLine = state.view.queue[state.view.queueOut].side.id;
+                ctx.beginPath();
+	        ctx.strokeStyle = 'black';
+                ctx.moveTo(coll.column+0.5, colTop+0.5);
+                ctx.lineTo(coll.column+0.5, colBot+1.5);
+                ctx.stroke();
+	    } else if (lastLine != coll.side.id && !coll.side.twosided) {
+	        lastLine = coll.side.id;
+                ctx.beginPath();
+	        ctx.strokeStyle = 'black';
+                ctx.moveTo(coll.column+0.5, colTop+0.5);
+                ctx.lineTo(coll.column+0.5, colBot+1.5);
+                ctx.stroke();
+	    } else {
+                ctx.beginPath();
+	        ctx.strokeStyle = 'black';
+                ctx.moveTo(coll.column+0.5, colTop+0.5);
+                ctx.lineTo(coll.column+0.5, colTop+1.5);
+                ctx.moveTo(coll.column+0.5, colBot+0.5);
+                ctx.lineTo(coll.column+0.5, colBot+1.5);
+                ctx.stroke();
+            }
 	}
     }
     ctx.restore();
@@ -500,53 +506,18 @@ function drawThreeD(state) {
         ctx.fillText("FPS: " + state.stats.FPS.toFixed(1), 4, 10);
         ctx.fillText("TPS: " + state.stats.TPS.toFixed(1), 4, 20);
     }
-//    console.log(maxLen);
 }
 
-function textureToColor(tex) {
-            return 'rgb(200,200,200)';
-    switch (tex) {
-    case "NUKAGE3":
-        return 'rgb(0,225,0)';
-    default:
-        if (tex.startsWith("FLOOR")) {
-            return 'rgb(100,100,100)';
-        } else if (tex.startsWith("CEIL")) {
-            return 'rgb(200,200,200)';
-        } else {
-            return 'rgb(150,200,100)';
-        }
-    }
-}
-
-function drawColumn(state, sector, startPos, rayStart, rayEnd, column, angle, windowTop, windowBot, depth) {
-    // if (sector.visited[column]) {
-    // 	return;
-    // }
-    // sector.visited[column] = true;
-    if (depth > state.view.renderDepth) {
-//        console.log("depth too large:", depth);
-        return;
-    }
+function scheduleColumn(state, sector, startPos, rayStart, rayEnd, column, angle, windowTop, windowBot) {
     if (windowTop > windowBot) {
         return;
     }
-//    console.log("sector", sector.id, "column", column, "windowTop", windowTop, "windowBot", windowBot);
+
     var player = state.player,
         ctx = state.view.threeDctx;
 
-    var collisions = [];
-    function insert(coll) {
-        var i = 0;
-        while (i < collisions.length) {
-            if (coll.dist > collisions[i].dist) {
-                collisions.splice(i, 0, coll);
-                return;
-            }
-            i += 1;
-        }
-        collisions.push(coll);
-    }
+    var collision = null;
+
     var dx = Math.cos(player.angle + angle),
         dy = Math.sin(player.angle + angle);
     sector.sides.forEach(function(side) {
@@ -555,28 +526,31 @@ function drawColumn(state, sector, startPos, rayStart, rayEnd, column, angle, wi
             var intersection = segmentIntersect(rayStart, rayEnd, side.p1, side.p2);
             if (intersection != null) {
                 var dist = pDist(intersection, startPos) * Math.cos(angle);
-                insert({dist: dist,
-                        intersection: intersection,
-			startPos: startPos,
-			rayStart: rayStart,
-			rayEnd: rayEnd,
-			depth: depth,
-                        side: side,
-                        column: column,
-                        angle: angle,
-			sector: sector,
-			windowTop: windowTop,
-			windowBot: windowBot});
+                if (collision === null || dist < collision.dist) {
+                    collision ={dist: dist,
+                                intersection: intersection,
+			        startPos: startPos,
+			        rayStart: rayStart,
+			        rayEnd: rayEnd,
+                                side: side,
+                                column: column,
+                                angle: angle,
+			        sector: sector,
+			        windowTop: windowTop,
+			        windowBot: windowBot};
+                }
             }
         }
     });
 
-    if (collisions.length > 0) {
-	state.view.queue.push(collisions[collisions.length-1]);
+    if (collision !== null) {
+        if ((state.view.queueIn + 1) % state.view.queue.length !== state.view.queueOut) {
+            state.view.queue[state.view.queueIn] = collision;
+            state.view.queueIn = (state.view.queueIn + 1) % state.view.queue.length;
+        } else {
+            console.log("render queue overflow");
+        }
     }
-    // collisions.forEach(function(coll) {
-    // 	state.view.queue.push(coll);
-    // });
 }
 
 function updateActorBbox(actor) {
@@ -1107,6 +1081,7 @@ function start() {
                           ceiling: sectordef.ceilingHeight,
                           floorTexture: sectordef.floorFlat,
                           ceilingTexture: sectordef.ceilingFlat,
+                          lightLevel: sectordef.lightLevel,
 			  sides: [],
 			  bbox: {l: giantNumber,
 				 r: -giantNumber,
@@ -1121,7 +1096,8 @@ function start() {
                         sector: sec,
                         lower: sidedef.lowerTexture,
                         upper: sidedef.upperTexture,
-                        middle: sidedef.middleTexture};
+                        middle: sidedef.middleTexture,
+                        flags: sidedef.flags};
 	    sec.sides.push(side);
             sides.push(side);
         }
@@ -1239,6 +1215,10 @@ function start() {
         yscale = height / (maxy - miny);
     var scale = xscale < yscale ? xscale : yscale;
 
+    var queue = [];
+    for (i = 0; i < threeDwidth; i++) {
+        queue.push(null);
+    }
     var state = {
         running: true,
 	update: updateState,
@@ -1265,10 +1245,14 @@ function start() {
             showCurrentSector: false,
 	    showLines: true,
 	    showSectors: false,
+            renderLines: false,
             showThreeD: true,
             showMap: true,
             renderDepth: 3,
-            queue: []
+            queueIn: 0,
+            queueOut: 0,
+            queue: queue,
+            maxQueueLen: 0
         },
         input: {
             moveBackward: false,
@@ -1300,7 +1284,7 @@ function start() {
             sector: null,
             height: 0,
             size: 56,
-            eyeLevel: 50,
+            eyeLevel: 42,
             stepHeight: 24
         },
         lines: lines,
