@@ -144,6 +144,30 @@ function draw(state) {
 	state.stats.lastFPSTimestamp = now;
     }
 
+    var player = state.player;
+    var pAngle = player.angle,
+	fov2 = player.fov / 2;
+    while (pAngle > Math.PI) {
+	pAngle -= Math.PI*2;
+    }
+    while (pAngle < -Math.PI) {
+	pAngle += Math.PI*2;
+    }
+    player.angle = pAngle;
+    for (var i = 0; i < state.monsters.length; i++) {
+	var monster = state.monsters[i];
+
+
+	var dx = monster.pos.x - player.pos.x,
+	    dy = monster.pos.y - player.pos.y;
+	var angleToMonster = Math.atan2(dy, dx);
+
+	if (Math.abs(pAngle - angleToMonster) <= fov2) {
+	    monster.distToPlayer = pDist(player.pos, monster.pos);
+	    monster.angleToPlayer = angleToMonster - Math.PI;
+	}
+    }
+
     if (state.view.showThreeD) {
         drawThreeD(state);
     }
@@ -326,9 +350,8 @@ function drawMap(state) {
 function drawThreeD(state) {
     var ctx = state.view.threeDctx;
     var player = state.player;
+    var fov2 = state.player.fov / 2;
 
-    state.view.fuel = 3000;
-    
     ctx.clearRect(0, 0, state.view.threeDwidth, state.view.threeDheight);
 
     ctx.save();
@@ -336,9 +359,10 @@ function drawThreeD(state) {
     ctx.strokeStyle = 'black';
     ctx.strokeRect(0, 0, state.view.threeDwidth, state.view.threeDheight);
 
-    var fov2 = state.player.fov / 2;
     var deltaAngle = state.player.fov / state.view.threeDwidth;
 
+    state.view.fuel = 3000;
+    
     // For each column, schedule the rendering of the scene for this column.
     for (var column = 1, angle = -fov2; column < state.view.threeDwidth-1; column++, angle += deltaAngle) {
         var dx = Math.cos(player.angle + angle),
@@ -353,6 +377,38 @@ function drawThreeD(state) {
     }
 
     processThreeDQueue(state);
+
+    if (state.view.renderMonsters) {
+	state.view.monsterQueue.sort(function(a, b) {
+	     b.distToPlayer - a.distToPlayer;
+	});
+	var horizon = state.view.threeDheight / 2;
+	// Eye height of player.
+	var eyeHeight = player.eyeLevel+player.height;
+	for (i = 0; i < state.view.monsterQueue.length; i++) {
+	    var coll = state.view.monsterQueue[i];
+	    var m = coll.monster;
+
+	    var mHeightFactor = 0.12*player.viewRange / coll.dist;
+
+	    // Top and bottom of the monter.
+	    var monsterTop = horizon + (mHeightFactor*(eyeHeight-(m.height + m.size))),
+		monsterBot = horizon + (mHeightFactor*(eyeHeight-m.height));
+
+	    if (monsterTop >= coll.windowBot || monsterBot <= coll.windowTop) {
+		continue;
+	    }
+	    // Now we clip the monster slice to the window we are looking through.
+	    var mTop = Math.max(monsterTop, coll.windowTop),
+		mBot = Math.min(monsterBot, coll.windowBot);
+	    ctx.beginPath();
+	    ctx.strokeStyle = 'brown';
+	    ctx.moveTo(coll.column+0.5, mTop-0.5);
+	    ctx.lineTo(coll.column+0.5, mBot+0.5);
+	    ctx.stroke();
+	}
+    }
+    state.view.monsterQueue = [];
 }
 
 function shadeGray(shade, lightLevel) {
@@ -369,6 +425,7 @@ function processThreeDQueue(state) {
     var eyeHeight = player.eyeLevel+player.height;
 
     var lastLine = -1;
+    var i;
 
     while (state.view.queueIn !== state.view.queueOut && state.view.fuel >= 0) {
 	state.view.fuel -= 1;
@@ -376,7 +433,7 @@ function processThreeDQueue(state) {
         state.view.queueOut = (state.view.queueOut + 1) % state.view.queue.length;
 
         // Determine color based on distance.
-        var distShade = 250 - ((coll.dist * 250 / player.viewRange) | 0);
+        var distShade = 255 - ((coll.dist * 230 / player.viewRange) | 0);
         var shade = shadeGray(distShade, coll.sector.lightLevel);
 
         // Determine the relative size of this wall fragment.
@@ -385,11 +442,6 @@ function processThreeDQueue(state) {
         // Top and bottom of the wall slice for the current column.
 	var sectorTop = horizon + (heightFactor*(eyeHeight-coll.sector.ceiling)),
 	    sectorBot = horizon + (heightFactor*(eyeHeight-coll.sector.floor));
-
-	if (sectorTop >= coll.windowBot || sectorBot <= coll.windowTop) {
-	    //console.log("sectorTop", sectorTop, "coll.windowBot", coll.windowBot, "sectorBot", sectorBot, "coll.windowTop", coll.windowTop);
-	    //continue;
-	}
 
         // Now we clip the wall slice to the window we are looking through.
         var colTop = Math.max(sectorTop, coll.windowTop),
@@ -561,6 +613,30 @@ function scheduleColumn(state, sector, startPos, rayStart, rayEnd, column, angle
             console.log("render queue overflow");
         }
     }
+
+    if (collision !== null && state.view.renderMonsters) {
+	for (i = 0; i < sector.monsters.length; i++) {
+	    var m = sector.monsters[i];
+	    var p3 = {x: m.pos.x + Math.cos(m.angleToPlayer - Math.PI/2) * m.radius,
+		      y: m.pos.y + Math.sin(m.angleToPlayer - Math.PI/2) * m.radius},
+		p4 = {x: m.pos.x + Math.cos(m.angleToPlayer + Math.PI/2) * m.radius,
+		      y: m.pos.y + Math.sin(m.angleToPlayer + Math.PI/2) * m.radius};
+	    var intersection = segmentIntersect(rayStart, rayEnd, p3, p4);
+	    if (intersection) {
+		var dist = pDist(startPos, intersection) * Math.cos(angle);
+		if (dist < collision.dist) {
+		    var collision = {sector: sector,
+				     dist: dist,
+				     column: column,
+				     windowTop: windowTop,
+				     windowBot: windowBot,
+				     monster: m};
+		    state.view.monsterQueue.push(collision);
+		}
+	    }
+	}
+    }
+
 }
 
 function updateActorBbox(actor) {
@@ -636,9 +712,13 @@ function updatePlayer(state) {
 
     if (state.player.sector != null) {
 	if (state.player.height > state.player.sector.floor) {
-            state.player.height -= 4;
+            state.player.height -= state.player.ySpeed;
+	    state.player.ySpeed += state.player.yAccel;
 	} else if (state.player.height < state.player.sector.floor) {
             state.player.height = state.player.sector.floor;
+	    state.player.ySpeed = 0;
+	} else {
+	    state.player.ySpeed = 0;
 	}
     }
 }
@@ -652,14 +732,14 @@ function updateMonsters(state) {
 
 	switch (monster.state) {
 	case "thinking":
-	    if (monster.tick > 50 || Math.random() < 0.01) {
+	    if (monster.tick > 100 || Math.random() < 0.01) {
 		monster.state = "walking"
 		monster.tick = 0;
 		monster.angle += Math.random() * Math.PI/2 - Math.PI/2;
 	    }
 	    break;
 	case "walking":
-	    if (monster.tick > 100 || Math.random() < 0.005) {
+	    if (monster.tick > 150 || Math.random() < 0.005) {
 		monster.state = "thinking"
 		monster.tick = 0;
 	    } else {
@@ -673,11 +753,14 @@ function updateMonsters(state) {
 	    break;
 	}
         if (monster.sector != null && monster.height > monster.sector.floor) {
-            monster.height -= 4;
-        }
-        if (monster.sector != null && monster.height < monster.sector.floor) {
+            monster.height -= monster.ySpeed;
+	    monster.ySpeed += monster.yAccel;
+        } else if (monster.sector != null && monster.height < monster.sector.floor) {
             monster.height = monster.sector.floor;
-        }
+	    monster.ySpeed = 0;
+        } else {
+	    monster.ySpeed = 0;
+	}
     }
 }
 
@@ -845,11 +928,15 @@ function collisionResolve(state, mob, dx, dy) {
 
                     var otherFloor = otherSide.sector.floor,
                         otherCeiling = otherSide.sector.ceiling;
-                    if (otherFloor - mob.height <= mob.stepHeight){// &&
-//                        otherCeiling > mob.height + mob.size) {
-			// Actor fits through opening to next sector.
-                        skip = true;
-                    }
+		    if (otherFloor >= mob.height) {
+			if (otherFloor - mob.height <= mob.stepHeight) {
+			    skip = true;
+			}
+		    } else if (otherFloor < mob.height) {
+			if (mob.height - otherFloor < mob.maxStepHeight) {
+			    skip = true;
+			}
+		    }
 		}
 
 		if (!skip) {
@@ -868,7 +955,7 @@ function collisionResolve(state, mob, dx, dy) {
 			dy += corrY;
 			changed = true;
 			collisionDetected = true;
-                    }
+		    }
 		}
             }
         }
@@ -896,7 +983,18 @@ function collisionResolve(state, mob, dx, dy) {
 
                 if (oldSide != newSide && oldSide != 0) {
                     var thisSide = newSide > 0 ? line.front : line.back;
+		    if (mob !== state.player && mob.sector) {
+			for (var n = 0; n < mob.sector.monsters.length; n++) {
+			    if (mob === mob.sector.monsters[n]) {
+				mob.sector.monsters.splice(n, 0);
+				break;
+			    }
+			}
+		    }
                     mob.sector = thisSide.sector;
+		    if (mob !== state.player) {
+			mob.sector.monsters.push(mob);
+		    }
 	        }
             }
         }
@@ -970,6 +1068,9 @@ function keyUpHandler(state, e) {
         break;
     case 68: // D
         state.input.strafeRight = false;
+	if (state.view.debug) {
+	    state.view.renderMonsters = !state.view.renderMonsters;
+	}
         break;
     case 37: // left
         state.input.turnLeft = false;
@@ -1018,8 +1119,8 @@ function start() {
     console.log("init...");
 
     var doomMap = true;
-    var width = 400;
-    var height = 300;
+    var width = 600;
+    var height = 400;
     var threeDwidth = 320;
     var threeDheight = 200;
     var i;
@@ -1032,8 +1133,8 @@ function start() {
     var threeDcanvas = document.getElementById("three-d-canvas");
     threeDcanvas.width = threeDwidth;
     threeDcanvas.height = threeDheight;
-    threeDcanvas.style.width = (threeDwidth * 2) + 'px';
-    threeDcanvas.style.height = (threeDheight * 2) + 'px';
+    threeDcanvas.style.width = (threeDwidth * 42) + 'px';
+    threeDcanvas.style.height = (threeDheight * 4) + 'px';
 
     var monsters = [];
     var playerpos = {x: 0, y: 0},
@@ -1069,12 +1170,14 @@ function start() {
         {id: 6, p1: p5, p2: p3, front: sides[7], back: null, twosided: false}
     ];
     if (doomMap) {
+	var level = level_E1M1;
+	
         sectors = [];
         sides = [];
         lines = [];
 
-        for (i = 0; i < level_E1M1.sectors.length; i++) {
-            var sectordef = level_E1M1.sectors[i];
+        for (i = 0; i < level.sectors.length; i++) {
+            var sectordef = level.sectors[i];
             var sector = {id: i,
                           floor: sectordef.floorHeight,
                           ceiling: sectordef.ceilingHeight,
@@ -1082,6 +1185,7 @@ function start() {
                           ceilingTexture: sectordef.ceilingFlat,
                           lightLevel: sectordef.lightLevel,
 			  sides: [],
+			  monsters: [],
 			  bbox: {l: giantNumber,
 				 r: -giantNumber,
 				 t: giantNumber,
@@ -1089,8 +1193,8 @@ function start() {
             sectors.push(sector);
         }
 	console.log(sectors.length + " sectors");
-        for (i = 0; i < level_E1M1.sidedefs.length; i++) {
-            var sidedef = level_E1M1.sidedefs[i];
+        for (i = 0; i < level.sidedefs.length; i++) {
+            var sidedef = level.sidedefs[i];
 	    var sec = sectors[sidedef.sector];
             var side = {id: i,
                         sector: sec,
@@ -1103,7 +1207,7 @@ function start() {
         }
 	console.log(sides.length + " sides");
 
-        var vertices = level_E1M1.vertices;
+        var vertices = level.vertices;
         var minx = giantNumber,
 	    maxx = -giantNumber,
 	    miny = giantNumber,
@@ -1121,8 +1225,8 @@ function start() {
         var shiftX = (minx + maxx) / 2,
 	    shiftY = (miny + maxy) / 2;
 
-        for (i = 0; i < level_E1M1.linedefs.length; i++) {
-	    var linedef = level_E1M1.linedefs[i];
+        for (i = 0; i < level.linedefs.length; i++) {
+	    var linedef = level.linedefs[i];
 	    var p1 = vertices[linedef.start],
 		p2 = vertices[linedef.end];
             var rSide = sides[linedef.right],
@@ -1156,13 +1260,14 @@ function start() {
 	    });
 	});
 
-        for (i = 0; i < level_E1M1.things.length; i++) {
-	    var thing = level_E1M1.things[i];
+        for (i = 0; i < level.things.length; i++) {
+	    var thing = level.things[i];
 	    if (thing.type == "Player1StartPos") {
 	        playerpos.x = thing.x - shiftX;
 	        playerpos.y = -thing.y - shiftY;
 	        playerangle = thing.angle*Math.PI/180;
 	    } else if (thing.type == "Imp" || thing.type == "FormerHuman" || thing.type == "FormerHumanSergeant") {
+		if (monsters.length < 20) {
 	        monsters.push({type: thing.type,
 			       pos: {x: thing.x - shiftX,
 				     y: -thing.y - shiftY},
@@ -1170,13 +1275,17 @@ function start() {
 			       angle: thing.angle*Math.PI/180,
 			       bbox: {},
 			       tick: 0,
-			       moveSpeed: 5,
+			       moveSpeed: 3,
+			       yAccel: 2,
+			       ySpeed: 0,
 			       state: "thinking",
                                sector: null,
                                height: 0,
                                size: 56,
-                               stepHeight: 24
+                               stepHeight: 24,
+			       maxStepHeight: 48
                               });
+		}
 	    }
         }
 	console.log(monsters.length + " monsters");
@@ -1222,7 +1331,7 @@ function start() {
     var scale = xscale < yscale ? xscale : yscale;
 
     var queue = [];
-    for (i = 0; i < threeDwidth; i++) {
+    for (i = 0; i < threeDwidth + threeDwidth * monsters.length; i++) {
         queue.push(null);
     }
     var state = {
@@ -1252,11 +1361,13 @@ function start() {
 	    showLines: true,
 	    showSectors: false,
             renderLines: false,
-            showThreeD: false,
-            showMap: true,
+	    renderMonsters: true,
+            showThreeD: true,
+            showMap: false,
             queueIn: 0,
             queueOut: 0,
             queue: queue,
+	    monsterQueue: [],
 	    fuel: 0
         },
         input: {
@@ -1283,6 +1394,8 @@ function start() {
             moveAngle: 0,
             moveAccel: 2,
             moveDecel: 2,
+	    yAccel: 2,
+	    ySpeed: 0,
             fov: 60*Math.PI/180,
             viewRange: 2000,
 	    bbox: {},
@@ -1290,7 +1403,8 @@ function start() {
             height: 0,
             size: 56,
             eyeLevel: 42,
-            stepHeight: 24
+            stepHeight: 24,
+	    maxStepHeight: 48
         },
         lines: lines,
         sides: sides,
@@ -1308,6 +1422,9 @@ function start() {
     state.player.sector = findSector(state, state.player.pos.x, state.player.pos.y);
     state.monsters.forEach(function(m) {
 	m.sector = findSector(state, m.pos.x, m.pos.y);
+	if (m.sector) {
+	    m.sector.monsters.push(m);
+	}
     });
 
     document.addEventListener('keyup', function(e) { keyUpHandler(state, e); });
