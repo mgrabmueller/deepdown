@@ -1133,8 +1133,8 @@ function start() {
     var threeDcanvas = document.getElementById("three-d-canvas");
     threeDcanvas.width = threeDwidth;
     threeDcanvas.height = threeDheight;
-    threeDcanvas.style.width = (threeDwidth * 42) + 'px';
-    threeDcanvas.style.height = (threeDheight * 4) + 'px';
+    threeDcanvas.style.width = (threeDwidth * 2) + 'px';
+    threeDcanvas.style.height = (threeDheight * 2) + 'px';
 
     var monsters = [];
     var playerpos = {x: 0, y: 0},
