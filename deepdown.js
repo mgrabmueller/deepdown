@@ -35,9 +35,12 @@ function segmentIntersect(p0, p1, p2, p3) {
 
     if(((rx0 >= 0 && rx0 <= 1) || (ry0 >= 0 && ry0 <= 1)) &&
        ((rx1 >= 0 && rx1 <= 1) || (ry1 >= 0 && ry1 <= 1))) {
+	var t = isNaN(rx0) ? (isNaN(ry0) ? (isNaN(rx1) ? ry1 : rx1) : ry0) : rx0;
+	
 	return {
 	    x: intersectX,
-	    y: intersectY
+	    y: intersectY,
+	    t: t
 	};
     } else {
 	return null;
@@ -166,6 +169,9 @@ function draw(state) {
 	    monster.distToPlayer = pDist(player.pos, monster.pos);
 	    monster.angleToPlayer = angleToMonster - Math.PI;
 	}
+
+	monster.animationCyle += 1;
+	monster.animationAngle = angleToMonster - Math.PI;
     }
 
     if (state.view.showThreeD) {
@@ -338,6 +344,9 @@ function drawMap(state) {
 
     ctx.restore();
 
+    ctx.drawImage(state.spriteMap["WALL97_3"].image,
+		  0,0);
+    
     // Draw FPS indicator after restoring, because we don't want it
     // transformed.
     ctx.font = 'bold 14px sans-serif';
@@ -361,7 +370,7 @@ function drawThreeD(state) {
 
     var deltaAngle = state.player.fov / state.view.threeDwidth;
 
-    state.view.fuel = 3000;
+    state.view.fuel = state.view.fuelReserve;
     
     // For each column, schedule the rendering of the scene for this column.
     for (var column = 1, angle = -fov2; column < state.view.threeDwidth-1; column++, angle += deltaAngle) {
@@ -379,9 +388,9 @@ function drawThreeD(state) {
     processThreeDQueue(state);
 
     if (state.view.renderMonsters) {
-	state.view.monsterQueue.sort(function(a, b) {
-	     b.distToPlayer - a.distToPlayer;
-	});
+	// state.view.monsterQueue.sort(function(a, b) {
+	//      b.dist - a.dist;
+	// });
 	var horizon = state.view.threeDheight / 2;
 	// Eye height of player.
 	var eyeHeight = player.eyeLevel+player.height;
@@ -401,11 +410,25 @@ function drawThreeD(state) {
 	    // Now we clip the monster slice to the window we are looking through.
 	    var mTop = Math.max(monsterTop, coll.windowTop),
 		mBot = Math.min(monsterBot, coll.windowBot);
-	    ctx.beginPath();
-	    ctx.strokeStyle = 'brown';
-	    ctx.moveTo(coll.column+0.5, mTop-0.5);
-	    ctx.lineTo(coll.column+0.5, mBot+0.5);
-	    ctx.stroke();
+
+	    // ctx.beginPath();
+	    // ctx.strokeStyle = 'yellow';
+	    // ctx.moveTo(coll.column+0.5, mTop-0.5);
+	    // ctx.lineTo(coll.column+0.5, mBot+0.5);
+	    // ctx.stroke();
+
+	    var monsterSize = monsterBot - monsterTop;
+	    var topRatio = (mTop - monsterTop) / monsterSize,
+		botRatio = (mBot - monsterTop) / monsterSize,
+		colRatio = coll.t;
+
+	    var srcSprite = state.spriteMap[m.spritePrefix + "A1"];
+
+	    ctx.drawImage(srcSprite.image,
+			  srcSprite.width*colRatio, topRatio*srcSprite.height,
+			  1, (botRatio-topRatio)*srcSprite.height,
+			  coll.column, mTop,
+			  1, mBot - mTop);
 	}
     }
     state.view.monsterQueue = [];
@@ -450,17 +473,22 @@ function processThreeDQueue(state) {
 	    continue;
 	}
 
+	var sectorSize = sectorBot - sectorTop;
+	var topRatio = (colTop - sectorTop) / sectorSize,
+	    botRatio = (colBot - sectorTop) / sectorSize,
+	    colRatio = coll.t;
+
         // Draw ceiling.
         ctx.beginPath();
 	ctx.strokeStyle = shadeGray(200, coll.sector.lightLevel);
-        ctx.moveTo(coll.column+0.5, coll.windowTop-0.5);
-        ctx.lineTo(coll.column+0.5, colTop+0.5);
+        ctx.moveTo(coll.column, coll.windowTop);
+        ctx.lineTo(coll.column, colTop);
         ctx.stroke();
         // Draw floor.
         ctx.beginPath();
 	ctx.strokeStyle = shadeGray(180, coll.sector.lightLevel);
-        ctx.moveTo(coll.column+0.5, colBot);
-        ctx.lineTo(coll.column+0.5, coll.windowBot+0.5);
+        ctx.moveTo(coll.column, colBot);
+        ctx.lineTo(coll.column, coll.windowBot);
         ctx.stroke();
 
         if (coll.side.line.twosided) {
@@ -471,15 +499,24 @@ function processThreeDQueue(state) {
             var otherSectorTop = horizon + (heightFactor * (eyeHeight - otherSector.ceiling)),
 	        otherSectorBot = horizon + (heightFactor * (eyeHeight - otherSector.floor));
 
-	    var middleTop = Math.max(otherSectorTop, colTop),
-	        middleBot = Math.min(otherSectorBot, colBot);
+	    var middleTop = Math.max(coll.windowTop, Math.max(otherSectorTop, colTop)),
+	        middleBot = Math.min(coll.windowBot, Math.min(otherSectorBot, colBot));
+
+	    var middleTopRatio = (middleTop - sectorTop) / sectorSize,
+		middleBotRatio = (middleBot - sectorTop) / sectorSize;
 
             if (colTop < middleTop && otherSector.ceiling < coll.sector.ceiling && coll.side.upper != "-") {
-		ctx.beginPath();
-		ctx.strokeStyle = shade;
-		ctx.moveTo(coll.column+0.5, colTop-0.5);
-		ctx.lineTo(coll.column+0.5, Math.min(colBot+0.5, middleTop+0.5));
-		ctx.stroke();
+		var srcSprite = state.spriteMap["WALL97_3"];
+		ctx.drawImage(srcSprite.image,
+			      srcSprite.width*colRatio, topRatio*srcSprite.height,
+			      1, (Math.min(botRatio, middleTopRatio)-topRatio)*srcSprite.height,
+			      coll.column, colTop,
+			      1, Math.min(colBot, middleTop) - colTop);
+		// ctx.beginPath();
+		// ctx.strokeStyle = shade;
+		// ctx.moveTo(coll.column+0.5, colTop-0.5);
+		// ctx.lineTo(coll.column+0.5, Math.min(colBot+0.5, middleTop+0.5));
+		// ctx.stroke();
 		if (middleTop < colBot && state.view.renderLines) {
                     ctx.beginPath();
 	            ctx.strokeStyle = 'black';
@@ -490,18 +527,30 @@ function processThreeDQueue(state) {
 	    }
 
             if (middleTop < middleBot && coll.side.middle != "-") {
-		ctx.beginPath();
-		ctx.strokeStyle = shade
-		ctx.moveTo(coll.column+0.5, middleTop-0.5);
-		ctx.lineTo(coll.column+0.5, middleBot+0.5);
-		ctx.stroke();
+		var srcSprite = state.spriteMap["WALL97_3"];
+		ctx.drawImage(srcSprite.image,
+			      srcSprite.width*colRatio, middleTopRatio*srcSprite.height,
+			      1, (middleBotRatio-middleTopRatio)*srcSprite.height,
+			      coll.column, middleTop,
+			      1, middleBot - middleTop);
+		// ctx.beginPath();
+		// ctx.strokeStyle = shade
+		// ctx.moveTo(coll.column+0.5, middleTop-0.5);
+		// ctx.lineTo(coll.column+0.5, middleBot+0.5);
+		// ctx.stroke();
             }
 	    if( otherSector.floor > coll.sector.floor && coll.side.lower != "-") {
-		ctx.beginPath();
-		ctx.strokeStyle = shade;
-		ctx.moveTo(coll.column+0.5, middleBot);
-		ctx.lineTo(coll.column+0.5, colBot+0.5);
-		ctx.stroke();
+		var srcSprite = state.spriteMap["WALL97_3"];
+		ctx.drawImage(srcSprite.image,
+			      srcSprite.width*colRatio, middleBotRatio*srcSprite.height,
+			      1, (botRatio-middleBotRatio)*srcSprite.height,
+			      coll.column, middleBot,
+			      1, colBot - middleBot);
+		// ctx.beginPath();
+		// ctx.strokeStyle = shade;
+		// ctx.moveTo(coll.column+0.5, middleBot);
+		// ctx.lineTo(coll.column+0.5, colBot+0.5);
+		// ctx.stroke();
 		if (middleBot > colTop && state.view.renderLines) {
                     ctx.beginPath();
 	            ctx.strokeStyle = 'black';
@@ -519,11 +568,17 @@ function processThreeDQueue(state) {
 		}
             }
         } else {
-            ctx.beginPath();
-	    ctx.strokeStyle = shade;
-            ctx.moveTo(coll.column+0.5, colTop-0.5);
-            ctx.lineTo(coll.column+0.5, colBot+0.5);
-            ctx.stroke();
+	    var srcSprite = state.spriteMap["WALL97_3"];
+	    ctx.drawImage(srcSprite.image,
+			  srcSprite.width*colRatio, topRatio*srcSprite.height,
+			  1, (botRatio-topRatio)*srcSprite.height,
+			  coll.column, colTop,
+			  1, colBot - colTop);
+            // ctx.beginPath();
+	    // ctx.strokeStyle = shade;
+            // ctx.moveTo(coll.column+0.5, colTop-0.5);
+            // ctx.lineTo(coll.column+0.5, colBot+0.5);
+            // ctx.stroke();
 	}
         if (state.view.renderLines) {
 	    if (state.view.queueIn != state.view.queueOut &&
@@ -589,7 +644,9 @@ function scheduleColumn(state, sector, startPos, rayStart, rayEnd, column, angle
             if (intersection != null) {
                 var dist = pDist(intersection, startPos) * Math.cos(angle);
                 if (collision === null || dist < collision.dist) {
+		    var t = pDist(side.p1, intersection) / pDist(side.p1, side.p2);
                     collision ={dist: dist,
+				t: t,
                                 intersection: intersection,
 			        startPos: startPos,
 			        rayStart: rayStart,
@@ -625,9 +682,11 @@ function scheduleColumn(state, sector, startPos, rayStart, rayEnd, column, angle
 	    if (intersection) {
 		var dist = pDist(startPos, intersection) * Math.cos(angle);
 		if (dist < collision.dist) {
+		    var t = pDist(p3, intersection) / pDist(p3, p4);
 		    var collision = {sector: sector,
 				     dist: dist,
 				     column: column,
+				     t: t,
 				     windowTop: windowTop,
 				     windowBot: windowBot,
 				     monster: m};
@@ -1136,6 +1195,8 @@ function start() {
     threeDcanvas.style.width = (threeDwidth * 2) + 'px';
     threeDcanvas.style.height = (threeDheight * 2) + 'px';
 
+    var spriteList = [];
+    var spriteMap = {};
     var monsters = [];
     var playerpos = {x: 0, y: 0},
 	playerangle = 0;
@@ -1267,30 +1328,78 @@ function start() {
 	        playerpos.y = -thing.y - shiftY;
 	        playerangle = thing.angle*Math.PI/180;
 	    } else if (thing.type == "Imp" || thing.type == "FormerHuman" || thing.type == "FormerHumanSergeant") {
+		var pfx;
+		switch (thing.type) {
+		case "Imp":
+		    pfx = "TROO";
+		    break;
+		case "FormerHuman":
+		    pfx = "POSS";
+		    break;
+		case "FormerHumanSergeant":
+		    pfx = "SPOS";
+		    break;
+		}
 		if (monsters.length < 20) {
-	        monsters.push({type: thing.type,
-			       pos: {x: thing.x - shiftX,
-				     y: -thing.y - shiftY},
-			       radius: 16,
-			       angle: thing.angle*Math.PI/180,
-			       bbox: {},
-			       tick: 0,
-			       moveSpeed: 3,
-			       yAccel: 2,
-			       ySpeed: 0,
-			       state: "thinking",
-                               sector: null,
-                               height: 0,
-                               size: 56,
-                               stepHeight: 24,
-			       maxStepHeight: 48
-                              });
+	            monsters.push({type: thing.type,
+				   spritePrefix: pfx,
+				   pos: {x: thing.x - shiftX,
+					 y: -thing.y - shiftY},
+				   radius: 16,
+				   angle: thing.angle*Math.PI/180,
+				   bbox: {},
+				   tick: 0,
+				   moveSpeed: 3,
+				   yAccel: 2,
+				   ySpeed: 0,
+				   state: "thinking",
+				   sector: null,
+				   height: 0,
+				   size: 56,
+				   stepHeight: 24,
+				   maxStepHeight: 48,
+				   animationCyle: 0
+				  });
 		}
 	    }
         }
 	console.log(monsters.length + " monsters");
 
-	level_E1M1 = null;
+	sprites["WALL97_3"] = patches["WALL97_3"];
+	for (var spriteName in sprites) {
+	    var sprite = sprites[spriteName];
+	    var cvs = document.createElement('canvas');
+	    cvs.width = sprite.width;
+	    cvs.height = sprite.height;
+	    var ctx = cvs.getContext('2d');
+	    var scale = 1;
+	    for (var x = 0; x < sprite.width; x++) {
+		var y = 0;
+		var col = sprite.columns[x];
+		for (var p = 0; p < col.length; p++) {
+		    var post = col[p];
+		    var tx = x*scale;
+		    for (var i = 0; i < post.pixels.length; i++) {
+			var ty = (post.top + i)*scale;
+			var idx = post.pixels[i];
+			var rgb = palettes[0][idx];
+			ctx.fillStyle = 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
+			ctx.fillRect(tx, ty, scale, scale);
+		    }
+		}
+	    }
+	    var spr = {image: cvs,
+		       width: sprite.width,
+		       height: sprite.height,
+		       leftOffset: sprite.leftOffset,
+		       topOffset: sprite.topOffset,
+		       name: sprite.name};
+	    spriteList.push(spr);
+	    spriteMap[sprite.name] = spr;
+	}
+
+	console.log(spriteList.length + " sprites");
+//	level_E1M1 = null;
     }
 
     /* Calculate some useful values per line. */
@@ -1353,7 +1462,7 @@ function start() {
             offset: {x: width / 2, y: height / 2},
             relative: true,
 	    showNormals: false,
-	    showFov: true,
+	    showFov: false,
             showLineNumbers: false,
             showSideNumbers: false,
 	    showBbox: false,
@@ -1363,12 +1472,13 @@ function start() {
             renderLines: false,
 	    renderMonsters: true,
             showThreeD: true,
-            showMap: false,
+            showMap: true,
             queueIn: 0,
             queueOut: 0,
             queue: queue,
 	    monsterQueue: [],
-	    fuel: 0
+	    fuel: 0,
+	    fuelReserve: 4000
         },
         input: {
             moveBackward: false,
@@ -1396,7 +1506,7 @@ function start() {
             moveDecel: 2,
 	    yAccel: 2,
 	    ySpeed: 0,
-            fov: 60*Math.PI/180,
+            fov: 80*Math.PI/180,
             viewRange: 2000,
 	    bbox: {},
             sector: null,
@@ -1410,6 +1520,8 @@ function start() {
         sides: sides,
         sectors: sectors,
 	monsters: monsters,
+	sprites: spriteList,
+	spriteMap: spriteMap,
 	stats: {lastFPSTimestamp: Date.now()-1500,
 		frameCount: 0,
 		FPS: 0,
