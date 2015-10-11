@@ -344,9 +344,6 @@ function drawMap(state) {
 
     ctx.restore();
 
-    ctx.drawImage(state.spriteMap["WALL97_3"].image,
-		  0,0);
-    
     // Draw FPS indicator after restoring, because we don't want it
     // transformed.
     ctx.font = 'bold 14px sans-serif';
@@ -422,7 +419,7 @@ function drawThreeD(state) {
 		botRatio = (mBot - monsterTop) / monsterSize,
 		colRatio = coll.t;
 
-	    var srcSprite = state.spriteMap[m.spritePrefix + "A1"];
+	    var srcSprite = getSprite(state, m.spritePrefix + "A1");
 
 	    ctx.drawImage(srcSprite.image,
 			  srcSprite.width*colRatio, topRatio*srcSprite.height,
@@ -437,6 +434,11 @@ function drawThreeD(state) {
 function shadeGray(shade, lightLevel) {
     var g = (shade * (lightLevel / 255)) | 0;
     return 'rgb(' + g + ',' + g + ',' + g + ')';
+}
+
+function shadeAlpha(shade, lightLevel) {
+    var g = (255-(shade * (lightLevel / 255)))/255;
+    return 'rgba(0,0,0,' + g + ')';
 }
 
 function processThreeDQueue(state) {
@@ -458,6 +460,7 @@ function processThreeDQueue(state) {
         // Determine color based on distance.
         var distShade = 255 - ((coll.dist * 230 / player.viewRange) | 0);
         var shade = shadeGray(distShade, coll.sector.lightLevel);
+        var alpha = shadeAlpha(distShade, coll.sector.lightLevel);
 
         // Determine the relative size of this wall fragment.
 	var heightFactor = 0.12*player.viewRange / coll.dist;
@@ -506,59 +509,68 @@ function processThreeDQueue(state) {
 		middleBotRatio = (middleBot - sectorTop) / sectorSize;
 
             if (colTop < middleTop && otherSector.ceiling < coll.sector.ceiling && coll.side.upper != "-") {
-		var srcSprite = state.spriteMap["WALL97_3"];
-		ctx.drawImage(srcSprite.image,
-			      srcSprite.width*colRatio, topRatio*srcSprite.height,
-			      1, (Math.min(botRatio, middleTopRatio)-topRatio)*srcSprite.height,
-			      coll.column, colTop,
-			      1, Math.min(colBot, middleTop) - colTop);
-		// ctx.beginPath();
-		// ctx.strokeStyle = shade;
-		// ctx.moveTo(coll.column+0.5, colTop-0.5);
-		// ctx.lineTo(coll.column+0.5, Math.min(colBot+0.5, middleTop+0.5));
-		// ctx.stroke();
-		if (middleTop < colBot && state.view.renderLines) {
-                    ctx.beginPath();
-	            ctx.strokeStyle = 'black';
-                    ctx.moveTo(coll.column+0.5, middleTop+0.5);
-                    ctx.lineTo(coll.column+0.5, middleTop+1.5);
-                    ctx.stroke();
+		var srcSprite = getTexture(state, coll.side.upper);
+		if (srcSprite !== null) {
+		    ctx.drawImage(srcSprite.image,
+				  srcSprite.width*colRatio, topRatio*srcSprite.height,
+				  1, (Math.min(botRatio, middleTopRatio)-topRatio)*srcSprite.height,
+				  coll.column, colTop,
+				  1, Math.min(colBot, middleTop) - colTop);
+		    ctx.beginPath();
+		    ctx.strokeStyle = alpha;
+		    ctx.moveTo(coll.column, colTop);
+		    ctx.lineTo(coll.column, Math.min(colBot, middleTop));
+		    ctx.stroke();
+		} else {
+		    ctx.beginPath();
+		    ctx.strokeStyle = shade;
+		    ctx.moveTo(coll.column, colTop);
+		    ctx.lineTo(coll.column, Math.min(colBot, middleTop));
+		    ctx.stroke();
 		}
 	    }
 
             if (middleTop < middleBot && coll.side.middle != "-") {
-		var srcSprite = state.spriteMap["WALL97_3"];
-		ctx.drawImage(srcSprite.image,
-			      srcSprite.width*colRatio, middleTopRatio*srcSprite.height,
-			      1, (middleBotRatio-middleTopRatio)*srcSprite.height,
-			      coll.column, middleTop,
-			      1, middleBot - middleTop);
-		// ctx.beginPath();
-		// ctx.strokeStyle = shade
-		// ctx.moveTo(coll.column+0.5, middleTop-0.5);
-		// ctx.lineTo(coll.column+0.5, middleBot+0.5);
-		// ctx.stroke();
+		var srcSprite = getTexture(state, coll.side.middle);
+		if (srcSprite !== null) {
+		    ctx.drawImage(srcSprite.image,
+				  srcSprite.width*colRatio, middleTopRatio*srcSprite.height,
+				  1, (middleBotRatio-middleTopRatio)*srcSprite.height,
+				  coll.column, middleTop,
+				  1, middleBot - middleTop);
+		    ctx.beginPath();
+		    ctx.strokeStyle = alpha;
+		    ctx.moveTo(coll.column, middleTop);
+		    ctx.lineTo(coll.column, middleBot);
+		    ctx.stroke();
+		} else {
+		    ctx.beginPath();
+		    ctx.strokeStyle = shade;
+		    ctx.moveTo(coll.column, middleTop);
+		    ctx.lineTo(coll.column, middleBot);
+		    ctx.stroke();
+		}
             }
 	    if( otherSector.floor > coll.sector.floor && coll.side.lower != "-") {
-		var srcSprite = state.spriteMap["WALL97_3"];
-		ctx.drawImage(srcSprite.image,
-			      srcSprite.width*colRatio, middleBotRatio*srcSprite.height,
-			      1, (botRatio-middleBotRatio)*srcSprite.height,
-			      coll.column, middleBot,
-			      1, colBot - middleBot);
-		// ctx.beginPath();
-		// ctx.strokeStyle = shade;
-		// ctx.moveTo(coll.column+0.5, middleBot);
-		// ctx.lineTo(coll.column+0.5, colBot+0.5);
-		// ctx.stroke();
-		if (middleBot > colTop && state.view.renderLines) {
-                    ctx.beginPath();
-	            ctx.strokeStyle = 'black';
-                    ctx.moveTo(coll.column+0.5, middleBot+0.5);
-                    ctx.lineTo(coll.column+0.5, middleBot+1.5);
-                    ctx.stroke();
-                }
-
+		var srcSprite = getTexture(state, coll.side.lower);
+		if (srcSprite !== null) {
+		    ctx.drawImage(srcSprite.image,
+				  srcSprite.width*colRatio, middleBotRatio*srcSprite.height,
+				  1, (botRatio-middleBotRatio)*srcSprite.height,
+				  coll.column, middleBot,
+				  1, colBot - middleBot);
+		    ctx.beginPath();
+		    ctx.strokeStyle = alpha;
+		    ctx.moveTo(coll.column, middleBot);
+		    ctx.lineTo(coll.column, colBot);
+		    ctx.stroke();
+		} else {
+		    ctx.beginPath();
+		    ctx.strokeStyle = shade;
+		    ctx.moveTo(coll.column, middleBot);
+		    ctx.lineTo(coll.column, colBot);
+		    ctx.stroke();
+		}
 	    }
 	    if (otherSectorTop >= coll.windowBot || otherSectorBot <= coll.windowTop) {
 	    } else {
@@ -568,47 +580,25 @@ function processThreeDQueue(state) {
 		}
             }
         } else {
-	    var srcSprite = state.spriteMap["WALL97_3"];
-	    ctx.drawImage(srcSprite.image,
-			  srcSprite.width*colRatio, topRatio*srcSprite.height,
-			  1, (botRatio-topRatio)*srcSprite.height,
-			  coll.column, colTop,
-			  1, colBot - colTop);
-            // ctx.beginPath();
-	    // ctx.strokeStyle = shade;
-            // ctx.moveTo(coll.column+0.5, colTop-0.5);
-            // ctx.lineTo(coll.column+0.5, colBot+0.5);
-            // ctx.stroke();
-	}
-        if (state.view.renderLines) {
-	    if (state.view.queueIn != state.view.queueOut &&
-                lastLine != -1 &&
-                lastLine != state.view.queue[state.view.queueOut].side.id &&
-                !state.view.queue[state.view.queueOut].side.twosided &&
-	        state.view.queue[state.view.queueOut].dist > coll.dist)
-            {
-	        lastLine = state.view.queue[state.view.queueOut].side.id;
-                ctx.beginPath();
-	        ctx.strokeStyle = 'black';
-                ctx.moveTo(coll.column+0.5, colTop+0.5);
-                ctx.lineTo(coll.column+0.5, colBot+1.5);
-                ctx.stroke();
-	    } else if (lastLine != coll.side.id && !coll.side.twosided) {
-	        lastLine = coll.side.id;
-                ctx.beginPath();
-	        ctx.strokeStyle = 'black';
-                ctx.moveTo(coll.column+0.5, colTop+0.5);
-                ctx.lineTo(coll.column+0.5, colBot+1.5);
-                ctx.stroke();
+	    var srcSprite = getTexture(state, coll.side.middle);
+	    if (srcSprite !== null) {
+		ctx.drawImage(srcSprite.image,
+			      srcSprite.width*colRatio, topRatio*srcSprite.height,
+			      1, (botRatio-topRatio)*srcSprite.height,
+			      coll.column, colTop,
+			      1, colBot - colTop);
+		ctx.beginPath();
+		ctx.strokeStyle = alpha;
+		ctx.moveTo(coll.column, colTop);
+		ctx.lineTo(coll.column, colBot);
+		ctx.stroke();
 	    } else {
-                ctx.beginPath();
-	        ctx.strokeStyle = 'black';
-                ctx.moveTo(coll.column+0.5, colTop+0.5);
-                ctx.lineTo(coll.column+0.5, colTop+1.5);
-                ctx.moveTo(coll.column+0.5, colBot+0.5);
-                ctx.lineTo(coll.column+0.5, colBot+1.5);
-                ctx.stroke();
-            }
+		ctx.beginPath();
+		ctx.strokeStyle = shade;
+		ctx.moveTo(coll.column, colTop);
+		ctx.lineTo(coll.column, colBot);
+		ctx.stroke();
+	    }
 	}
     }
     ctx.restore();
@@ -1174,6 +1164,70 @@ function keyUpHandler(state, e) {
     }
 }
 
+function prepareSprite(ctx, sprite, xofs, yofs) {
+    var scale = 1;
+    for (var x = 0; x < sprite.width; x++) {
+	var y = 0;
+	var col = sprite.columns[x];
+	for (var p = 0; p < col.length; p++) {
+	    var post = col[p];
+	    var tx = x*scale;
+	    for (var i = 0; i < post.pixels.length; i++) {
+		var ty = (post.top + i)*scale;
+		var idx = post.pixels[i];
+		var rgb = palettes[0][idx];
+		ctx.fillStyle = 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
+		ctx.fillRect(tx + xofs, ty + yofs, scale, scale);
+	    }
+	}
+    }
+}
+
+function getSprite(state, spriteName) {
+    if (!state.spriteMap[spriteName]) {
+	console.log('loading sprite ' + spriteName);
+	var sprite = state.rawSprites[spriteName];
+	var cvs = document.createElement('canvas');
+	cvs.width = sprite.width;
+	cvs.height = sprite.height;
+	var ctx = cvs.getContext('2d');
+	prepareSprite(ctx, sprite, 0, 0);
+	var spr = {image: cvs,
+		   width: sprite.width,
+		   height: sprite.height,
+		   leftOffset: sprite.leftOffset,
+		   topOffset: sprite.topOffset,
+		   name: sprite.name};
+	state.spriteMap[spriteName] = spr;
+    }
+    return state.spriteMap[spriteName];
+}
+
+function getTexture(state, textureName) {
+    if (!state.textureMap[textureName]) {
+	console.log('loading texture ' + textureName);
+	var texture = state.rawTextures[textureName];
+	var cvs = document.createElement('canvas');
+	cvs.width = texture.width;
+	cvs.height = texture.height;
+	var ctx = cvs.getContext('2d');
+	texture.patches.forEach(function(patch) {
+	    var patchName = state.rawPnames[patch.pname];
+	    console.log('loading patch ' + patchName);
+	    var sprite = state.rawPatches[patchName];
+	    prepareSprite(ctx, sprite, patch.xoffset, patch.yoffset);
+	});
+	var tex = {image: cvs,
+		   width: texture.width,
+		   height: texture.height,
+		   leftOffset: 0,
+		   topOffset: 0,
+		   name: textureName};
+	state.textureMap[textureName] = tex;
+    }
+    return state.textureMap[textureName];
+}
+
 function start() {
     console.log("init...");
 
@@ -1195,8 +1249,6 @@ function start() {
     threeDcanvas.style.width = (threeDwidth * 2) + 'px';
     threeDcanvas.style.height = (threeDheight * 2) + 'px';
 
-    var spriteList = [];
-    var spriteMap = {};
     var monsters = [];
     var playerpos = {x: 0, y: 0},
 	playerangle = 0;
@@ -1231,7 +1283,7 @@ function start() {
         {id: 6, p1: p5, p2: p3, front: sides[7], back: null, twosided: false}
     ];
     if (doomMap) {
-	var level = level_E1M1;
+	var level = level_E1M3;
 	
         sectors = [];
         sides = [];
@@ -1365,40 +1417,6 @@ function start() {
         }
 	console.log(monsters.length + " monsters");
 
-	sprites["WALL97_3"] = patches["WALL97_3"];
-	for (var spriteName in sprites) {
-	    var sprite = sprites[spriteName];
-	    var cvs = document.createElement('canvas');
-	    cvs.width = sprite.width;
-	    cvs.height = sprite.height;
-	    var ctx = cvs.getContext('2d');
-	    var scale = 1;
-	    for (var x = 0; x < sprite.width; x++) {
-		var y = 0;
-		var col = sprite.columns[x];
-		for (var p = 0; p < col.length; p++) {
-		    var post = col[p];
-		    var tx = x*scale;
-		    for (var i = 0; i < post.pixels.length; i++) {
-			var ty = (post.top + i)*scale;
-			var idx = post.pixels[i];
-			var rgb = palettes[0][idx];
-			ctx.fillStyle = 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
-			ctx.fillRect(tx, ty, scale, scale);
-		    }
-		}
-	    }
-	    var spr = {image: cvs,
-		       width: sprite.width,
-		       height: sprite.height,
-		       leftOffset: sprite.leftOffset,
-		       topOffset: sprite.topOffset,
-		       name: sprite.name};
-	    spriteList.push(spr);
-	    spriteMap[sprite.name] = spr;
-	}
-
-	console.log(spriteList.length + " sprites");
 //	level_E1M1 = null;
     }
 
@@ -1469,7 +1487,6 @@ function start() {
             showCurrentSector: false,
 	    showLines: true,
 	    showSectors: false,
-            renderLines: false,
 	    renderMonsters: true,
             showThreeD: true,
             showMap: true,
@@ -1520,8 +1537,12 @@ function start() {
         sides: sides,
         sectors: sectors,
 	monsters: monsters,
-	sprites: spriteList,
-	spriteMap: spriteMap,
+	rawSprites: sprites,
+	rawPatches: patches,
+	rawPnames: pnames,
+	rawTextures: textures,
+	spriteMap: {},
+	textureMap: {},
 	stats: {lastFPSTimestamp: Date.now()-1500,
 		frameCount: 0,
 		FPS: 0,
