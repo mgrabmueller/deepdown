@@ -458,7 +458,7 @@ function processThreeDQueue(state) {
         state.view.queueOut = (state.view.queueOut + 1) % state.view.queue.length;
 
         // Determine color based on distance.
-        var distShade = 255 - ((coll.dist * 230 / player.viewRange) | 0);
+        var distShade = 255 - ((coll.dist * 255 / player.viewRange) | 0);
         var shade = shadeGray(distShade, coll.sector.lightLevel);
         var alpha = shadeAlpha(distShade, coll.sector.lightLevel);
 
@@ -508,11 +508,14 @@ function processThreeDQueue(state) {
 	    var middleTopRatio = (middleTop - sectorTop) / sectorSize,
 		middleBotRatio = (middleBot - sectorTop) / sectorSize;
 
+	    var topSize = coll.sector.ceiling - otherSector.ceiling,
+		botSize = otherSector.floor - coll.sector.floor;
+
             if (colTop < middleTop && otherSector.ceiling < coll.sector.ceiling && coll.side.upper != "-") {
 		var srcSprite = getTexture(state, coll.side.upper);
 		if (srcSprite !== null) {
 		    ctx.drawImage(srcSprite.image,
-				  srcSprite.width*colRatio, topRatio*srcSprite.height,
+				  (coll.part + coll.side.xofs) % srcSprite.width, topRatio*srcSprite.height,
 				  1, (Math.min(botRatio, middleTopRatio)-topRatio)*srcSprite.height,
 				  coll.column, colTop,
 				  1, Math.min(colBot, middleTop) - colTop);
@@ -534,7 +537,7 @@ function processThreeDQueue(state) {
 		var srcSprite = getTexture(state, coll.side.middle);
 		if (srcSprite !== null) {
 		    ctx.drawImage(srcSprite.image,
-				  srcSprite.width*colRatio, middleTopRatio*srcSprite.height,
+				  (coll.part + coll.side.xofs) % srcSprite.width, middleTopRatio*srcSprite.height,
 				  1, (middleBotRatio-middleTopRatio)*srcSprite.height,
 				  coll.column, middleTop,
 				  1, middleBot - middleTop);
@@ -555,7 +558,7 @@ function processThreeDQueue(state) {
 		var srcSprite = getTexture(state, coll.side.lower);
 		if (srcSprite !== null) {
 		    ctx.drawImage(srcSprite.image,
-				  srcSprite.width*colRatio, middleBotRatio*srcSprite.height,
+				  (coll.part + coll.side.xofs) % srcSprite.width, middleBotRatio*srcSprite.height,
 				  1, (botRatio-middleBotRatio)*srcSprite.height,
 				  coll.column, middleBot,
 				  1, colBot - middleBot);
@@ -583,7 +586,7 @@ function processThreeDQueue(state) {
 	    var srcSprite = getTexture(state, coll.side.middle);
 	    if (srcSprite !== null) {
 		ctx.drawImage(srcSprite.image,
-			      srcSprite.width*colRatio, topRatio*srcSprite.height,
+			      (coll.part + coll.side.xofs) % srcSprite.width, (topRatio*(coll.sector.ceiling - coll.sector.floor) + coll.side.yofs) % srcSprite.height,
 			      1, (botRatio-topRatio)*srcSprite.height,
 			      coll.column, colTop,
 			      1, colBot - colTop);
@@ -634,9 +637,11 @@ function scheduleColumn(state, sector, startPos, rayStart, rayEnd, column, angle
             if (intersection != null) {
                 var dist = pDist(intersection, startPos) * Math.cos(angle);
                 if (collision === null || dist < collision.dist) {
-		    var t = pDist(side.p1, intersection) / pDist(side.p1, side.p2);
+		    var part = pDist(side.p1, intersection),
+			t = part / pDist(side.p1, side.p2);
                     collision ={dist: dist,
 				t: t,
+				part: part,
                                 intersection: intersection,
 			        startPos: startPos,
 			        rayStart: rayStart,
@@ -1165,19 +1170,18 @@ function keyUpHandler(state, e) {
 }
 
 function prepareSprite(ctx, sprite, xofs, yofs) {
-    var scale = 1;
     for (var x = 0; x < sprite.width; x++) {
 	var y = 0;
 	var col = sprite.columns[x];
 	for (var p = 0; p < col.length; p++) {
 	    var post = col[p];
-	    var tx = x*scale;
+	    var tx = x;
 	    for (var i = 0; i < post.pixels.length; i++) {
-		var ty = (post.top + i)*scale;
+		var ty = (post.top + i);
 		var idx = post.pixels[i];
 		var rgb = palettes[0][idx];
 		ctx.fillStyle = 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
-		ctx.fillRect(tx + xofs, ty + yofs, scale, scale);
+		ctx.fillRect(tx + xofs, ty + yofs, 1, 1);
 	    }
 	}
     }
@@ -1283,7 +1287,7 @@ function start() {
         {id: 6, p1: p5, p2: p3, front: sides[7], back: null, twosided: false}
     ];
     if (doomMap) {
-	var level = level_E1M3;
+	var level = level_E1M1
 	
         sectors = [];
         sides = [];
@@ -1311,6 +1315,8 @@ function start() {
 	    var sec = sectors[sidedef.sector];
             var side = {id: i,
                         sector: sec,
+			xofs: sidedef.xofs,
+			yofs: sidedef.yofs,
                         lower: sidedef.lowerTexture,
                         upper: sidedef.upperTexture,
                         middle: sidedef.middleTexture,
