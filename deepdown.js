@@ -75,29 +75,23 @@ function pDist(p1, p2) {
     return Math.sqrt(dx * dx + dy * dy);
 }
 
-/* Find the sector that contains point (x,y).  Return null if not
- * inside any sector. Note that this is not fool-proof and may return
- * a wrong sector for certain maps.  */
-function findSector(state, x, y) {
-    var foundSector = null,
-	smallestArea = 1000000000000;
-    state.sectors.forEach(function(sec) {
-	if (bboxContains(sec.bbox, x, y)) {
-	    var area = (sec.bbox.r - sec.bbox.l) * (sec.bbox.b - sec.bbox.t);
-	    if (area < smallestArea) {
-		var sideOf = sideOfLine(sec.sides[0], x, y);
-		var i = 1;
-		while (i < sec.sides.length && sideOfLine(sec.sides[1], x, y) == sideOf) {
-		    i++;
-		}
-		if (i == sec.sides.length) {
-		    smallestArea = area;
-		    foundSector = sec;
-		}
-	    }
+/* Find the subsector that contains
+ * the posision x/y.  Uses the BSP
+ * tree, just like DOOM.  */
+function findSubSector(state, x, y) {
+    var nodeIdx = state.nodes.length - 1;
+    while ((nodeIdx & 0x8000) == 0) {
+	var node = state.nodes[nodeIdx];
+	var l = {p1: {x: node.x, y: node.y},
+		 p2: {x: node.x + node.dx, y: node.y + node.dy}
+		};
+	if (sideOfLine(l, x, y) > 0) {
+	    nodeIdx = node.rightNodeOrSSector;
+	} else {
+	    nodeIdx = node.leftNodeOrSSector;
 	}
-    });
-    return foundSector;
+    }
+    return state.ssectors[nodeIdx & (~0x8000)];
 }
 
 /* Draw a bounding box.  */
@@ -132,8 +126,9 @@ function drawActor(state, actor, color) {
         ctx.font = 'bold 10px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-	var id = actor.sector === null ? -1 : actor.sector.id;
-        ctx.fillText("" + id + "@" + actor.height, actor.pos.x, actor.pos.y);
+	var id = actor.subsector ? actor.subsector.id : -1;
+	var secid = actor.subsector ? actor.subsector.sector.id : -1;
+        ctx.fillText("" + id + '/' + secid + "@" + actor.height, actor.pos.x, actor.pos.y);
     }
 }
 
@@ -244,7 +239,7 @@ function drawMap(state) {
             ctx.fillText("sec " + sec.id,
 			 (sec.bbox.l + sec.bbox.r) / 2,
 			 (sec.bbox.t + sec.bbox.b) / 2);
-	    if (sec === state.player.sector) {
+	    if (sec === state.player.subsector.sector) {
 		sec.sides.forEach(function(side) {
 		    ctx.beginPath();
 		    ctx.lineWidth = 2;
@@ -292,14 +287,14 @@ function drawMap(state) {
             ctx.stroke();
 
 	    if (state.view.showNormals) {
-		if (line.front.sector === state.player.sector) {
+		if (line.front.sector === state.player.subsector.sector) {
 		    ctx.beginPath();
 		    ctx.strokeStyle = 'blue';
 		    ctx.moveTo(line.front.p1.x + line.front.delta.x/2, line.front.p1.y + line.front.delta.y/2);
 		    ctx.lineTo(line.front.p1.x + line.front.delta.x/2 + line.front.normal.x*10, line.front.p1.y + line.front.delta.y/2 + line.front.normal.y*10);
 		    ctx.stroke();
 		}
-		if (line.back !== null && line.back.sector === state.player.sector) {
+		if (line.back !== null && line.back.sector === state.player.subsector.sector) {
 		    ctx.beginPath();
 		    ctx.strokeStyle = 'red';
 		    ctx.moveTo(line.back.p1.x + line.back.delta.x/2, line.back.p1.y + line.back.delta.y/2);
@@ -342,6 +337,16 @@ function drawMap(state) {
     // Draw the player.
     drawActor(state, player, 'rgb(128,200,0)');
 
+    // ctx.strokeStyle = 'red';
+    // ctx.lineWidth = 3;
+    // for (i = player.subsector.segStart; i < player.subsector.segStart + player.subsector.segCount; i++) {
+    // 	var seg = state.segs[i];
+    // 	ctx.beginPath();
+    // 	ctx.moveTo(seg.p1.x, seg.p1.y);
+    // 	ctx.lineTo(seg.p2.x, seg.p2.y);
+    // 	ctx.stroke();
+    // }
+    
     ctx.restore();
 
     // Draw FPS indicator after restoring, because we don't want it
@@ -375,7 +380,7 @@ function drawThreeD(state) {
             dy = Math.sin(player.angle + angle),
             rayStart = player.pos,
             rayEnd = {x: player.pos.x + dx * player.viewRange, y: player.pos.y + dy * player.viewRange};
-        scheduleColumn(state, state.player.sector, state.player.pos, rayStart, rayEnd,
+        scheduleColumn(state, state.player.subsector.sector, state.player.pos, rayStart, rayEnd,
 		       column, angle, 0, state.view.threeDheight-1);
 	if (state.fuel <= 0) {
 	    break;
@@ -764,12 +769,12 @@ function updatePlayer(state) {
         collisionResolve(state, state.player, vx, vy);
     }
 
-    if (state.player.sector != null) {
-	if (state.player.height > state.player.sector.floor) {
+    if (state.player.subsector.sector != null) {
+	if (state.player.height > state.player.subsector.sector.floor) {
             state.player.height -= state.player.ySpeed;
 	    state.player.ySpeed += state.player.yAccel;
-	} else if (state.player.height < state.player.sector.floor) {
-            state.player.height = state.player.sector.floor;
+	} else if (state.player.height < state.player.subsector.sector.floor) {
+            state.player.height = state.player.subsector.sector.floor;
 	    state.player.ySpeed = 0;
 	} else {
 	    state.player.ySpeed = 0;
@@ -806,11 +811,11 @@ function updateMonsters(state) {
 	    }
 	    break;
 	}
-        if (monster.sector != null && monster.height > monster.sector.floor) {
+        if (monster.subsector.sector != null && monster.height > monster.subsector.sector.floor) {
             monster.height -= monster.ySpeed;
 	    monster.ySpeed += monster.yAccel;
-        } else if (monster.sector != null && monster.height < monster.sector.floor) {
-            monster.height = monster.sector.floor;
+        } else if (monster.subsector.sector != null && monster.height < monster.subsector.sector.floor) {
+            monster.height = monster.subsector.sector.floor;
 	    monster.ySpeed = 0;
         } else {
 	    monster.ySpeed = 0;
@@ -1019,41 +1024,56 @@ function collisionResolve(state, mob, dx, dy) {
     }
 
     if (dx != 0 || dy != 0) {
-	var newX = mob.pos.x + dx,
-	    newY = mob.pos.y + dy;
-	var newPlayerPos = {x: newX, y: newY};
-	for (var i = 0; i < state.lines.length; i++) {
-	    var line = state.lines[i];
+	// var newX = mob.pos.x + dx,
+	//     newY = mob.pos.y + dy;
+	// var newPlayerPos = {x: newX, y: newY};
+	// for (var i = 0; i < state.lines.length; i++) {
+	//     var line = state.lines[i];
 
-            var projected = projectPointToLine(newPlayerPos, line);
+        //     var projected = projectPointToLine(newPlayerPos, line);
 
-	    if (line.twosided && projected.t >= 0 && projected.t <= 1 &&
-		bboxIntersect(line.bbox, {l: mob.bbox.l + dx,
-                                          r: mob.bbox.r + dx,
-                                          t: mob.bbox.t + dy,
-                                          b: mob.bbox.b + dy})) {
-                var oldSide = sideOfLine(line, mob.pos.x, mob.pos.y);
-                var newSide = sideOfLine(line, newX, newY);
+	//     if (line.twosided && projected.t >= 0 && projected.t <= 1 &&
+	// 	bboxIntersect(line.bbox, {l: mob.bbox.l + dx,
+        //                                   r: mob.bbox.r + dx,
+        //                                   t: mob.bbox.t + dy,
+        //                                   b: mob.bbox.b + dy})) {
+        //         var oldSide = sideOfLine(line, mob.pos.x, mob.pos.y);
+        //         var newSide = sideOfLine(line, newX, newY);
 
-                if (oldSide != newSide && oldSide != 0) {
-                    var thisSide = newSide > 0 ? line.front : line.back;
-		    if (mob !== state.player && mob.sector) {
-			for (var n = 0; n < mob.sector.monsters.length; n++) {
-			    if (mob === mob.sector.monsters[n]) {
-				mob.sector.monsters.splice(n, 0);
-				break;
-			    }
-			}
-		    }
-                    mob.sector = thisSide.sector;
-		    if (mob !== state.player) {
-			mob.sector.monsters.push(mob);
-		    }
-	        }
-            }
-        }
+        //         if (oldSide != newSide && oldSide != 0) {
+        //             var thisSide = newSide > 0 ? line.front : line.back;
+	// 	    if (mob !== state.player && mob.subsector.sector) {
+	// 		for (var n = 0; n < mob.subsector.sector.monsters.length; n++) {
+	// 		    if (mob === mob.sector.monsters[n]) {
+	// 			mob.sector.monsters.splice(n, 0);
+	// 			break;
+	// 		    }
+	// 		}
+	// 	    }
+        //             mob.sector = thisSide.sector;
+	// 	    if (mob !== state.player) {
+	// 		mob.sector.monsters.push(mob);
+	// 	    }
+	//         }
+        //     }
+        // }
         mob.pos.x += dx;
         mob.pos.y += dy;
+	var oldSubsector = mob.subsector;
+	mob.subsector = findSubSector(state, mob.pos.x, mob.pos.y);
+	if (mob.subsector !== oldSubsector) {
+	    if (mob !== state.player) {
+		for (var n = 0; n < oldSubsector.sector.monsters.length; n++) {
+		    if (mob === oldSubsector.sector.monsters[n]) {
+			oldSubsector.sector.monsters.splice(n, 0);
+			break;
+		    }
+		}
+	    }
+	    if (mob !== state.player) {
+		mob.subsector.sector.monsters.push(mob);
+	    }
+	}
     }
     return collisionDetected;
 }
@@ -1292,6 +1312,9 @@ function start() {
         sectors = [];
         sides = [];
         lines = [];
+	nodes = [];
+	ssectors = [];
+	segs = [];
 
         for (i = 0; i < level.sectors.length; i++) {
             var sectordef = level.sectors[i];
@@ -1369,6 +1392,46 @@ function start() {
         }
 	console.log(lines.length + " lines");
 
+        for (i = 0; i < level.nodes.length; i++) {
+            var nodedef = level.nodes[i];
+	    var node = {x: nodedef.x - shiftX,
+			y: -nodedef.y - shiftY,
+			dx: nodedef.dx,
+			dy: -nodedef.dy,
+			leftNodeOrSSector: nodedef.leftNodeOrSSector,
+			rightNodeOrSSector: nodedef.rightNodeOrSSector};
+	    nodes.push(node);
+	}
+	console.log(nodes.length + " nodes");
+	
+        for (i = 0; i < level.segs.length; i++) {
+            var segdef = level.segs[i];
+	    var side = segdef.direction == 0 ?
+		lines[segdef.lineDef].front :
+		lines[segdef.lineDef].back;
+	    var seg = {p1: {x: vertices[segdef.start].x - shiftX,
+			    y: -vertices[segdef.start].y - shiftY},
+		       p2: {x: vertices[segdef.end].x - shiftX,
+			    y: -vertices[segdef.end].y - shiftY},
+		       line: lines[segdef.lineDef],
+		       direction: segdef.direction,
+		       side: side,
+		       sector: side.sector
+		      };
+	    segs.push(seg);
+	}
+	console.log(segs.length + " segs");
+	
+        for (i = 0; i < level.ssectors.length; i++) {
+            var ssectordef = level.ssectors[i];
+	    var ssector = {id: i,
+			   segCount: ssectordef.segCount,
+			   segStart: ssectordef.segStart,
+			   sector: segs[ssectordef.segStart].sector};
+	    ssectors.push(ssector);
+	}
+	console.log(ssectors.length + " ssectors");
+	
 	/* Calculate bounding boxes for all sectors.  */
 	sectors.forEach(function(sec) {
 	    sec.sides.forEach(function(sid) {
@@ -1485,12 +1548,12 @@ function start() {
             scale: scale,
             offset: {x: width / 2, y: height / 2},
             relative: true,
-	    showNormals: false,
+	    showNormals: true,
 	    showFov: false,
             showLineNumbers: false,
             showSideNumbers: false,
 	    showBbox: false,
-            showCurrentSector: false,
+            showCurrentSector: true,
 	    showLines: true,
 	    showSectors: false,
 	    renderMonsters: true,
@@ -1542,6 +1605,9 @@ function start() {
         lines: lines,
         sides: sides,
         sectors: sectors,
+	nodes: nodes,
+	ssectors: ssectors,
+	segs: segs,
 	monsters: monsters,
 	rawSprites: sprites,
 	rawPatches: patches,
@@ -1558,11 +1624,11 @@ function start() {
                 TPS: 0}
     };
 
-    state.player.sector = findSector(state, state.player.pos.x, state.player.pos.y);
+    state.player.subsector = findSubSector(state, state.player.pos.x, state.player.pos.y);
     state.monsters.forEach(function(m) {
-	m.sector = findSector(state, m.pos.x, m.pos.y);
-	if (m.sector) {
-	    m.sector.monsters.push(m);
+	m.subsector = findSubSector(state, m.pos.x, m.pos.y);
+	if (m.subsector.sector) {
+	    m.subsector.sector.monsters.push(m);
 	}
     });
 
