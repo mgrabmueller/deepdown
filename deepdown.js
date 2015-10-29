@@ -36,7 +36,7 @@ function segmentIntersect(p0, p1, p2, p3) {
     if(((rx0 >= 0 && rx0 <= 1) || (ry0 >= 0 && ry0 <= 1)) &&
        ((rx1 >= 0 && rx1 <= 1) || (ry1 >= 0 && ry1 <= 1))) {
 	var t = isNaN(rx0) ? (isNaN(ry0) ? (isNaN(rx1) ? ry1 : rx1) : ry0) : rx0;
-	
+
 	return {
 	    x: intersectX,
 	    y: intersectY,
@@ -373,7 +373,7 @@ function drawThreeD(state) {
     var deltaAngle = state.player.fov / state.view.threeDwidth;
 
     state.view.fuel = state.view.fuelReserve;
-    
+
     // For each column, schedule the rendering of the scene for this column.
     for (var column = 1, angle = -fov2; column < state.view.threeDwidth-1; column++, angle += deltaAngle) {
         var dx = Math.cos(player.angle + angle),
@@ -1308,7 +1308,7 @@ function start() {
     ];
     if (doomMap) {
 	var level = level_E1M1
-	
+
         sectors = [];
         sides = [];
         lines = [];
